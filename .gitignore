@@ -218,11 +218,11 @@ __marimo__/
 .streamlit/secrets.toml
 
 # --- target-analyzer ---
-# Local symlink into the private home-docs repo (docs live there, not in this public repo).
+# Local symlink into the maintainer's private docs (not part of this public repo).
 internal_docs
 .claude/
 .DS_Store
-# Local dev database (prod is the shared Postgres on petel).
+# Local dev database (production uses Postgres).
 *.db
 *.db-wal
 *.db-shm

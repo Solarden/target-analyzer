@@ -18,7 +18,7 @@ Two pieces:
   *canonical frame* via homography (an ArUco marker board, least-squares fit),
   marks hits by clicking, and ships canonical `(x, y)` coordinates to the server.
   An offline outbox queues submissions when the server is unreachable.
-- **Raspberry Pi (`petel`) — the server.** A FastAPI app that turns coordinates
+- **Raspberry Pi — the server.** A FastAPI app that turns coordinates
   into ring scores + metrics from the (versioned) target profile, persists to
   Postgres, and serves an HTMX dashboard behind a login.
 

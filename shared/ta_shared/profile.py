@@ -22,7 +22,7 @@ class TargetProfile(BaseModel):
     n_rings: int
     ring_radii_px: list[int]  # ascending, len == n_rings
     target_diam_mm: float | None = None  # outer scoring-ring diameter -> mm metrics
-    board: MarkerBoard  # client registration (ArUco)
+    board: MarkerBoard
     manual_corners_canon: list[tuple[float, float]]  # 4 dst pts for the manual 4-click fallback
 
 

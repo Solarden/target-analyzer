@@ -1,5 +1,5 @@
-"""Server settings. Production values come from the environment (TA_* vars, pushed
-to LUKS by deploy.sh); the defaults here are the zero-setup local-dev values.
+"""Server settings. Production values come from the environment (TA_* vars); the
+defaults here are the zero-setup local-dev values.
 """
 
 from functools import lru_cache
@@ -11,7 +11,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TA_", env_file=".env", extra="ignore")
 
-    # SQLite for local dev; production points at the shared Postgres on petel.
     database_url: str = "sqlite:///./target_analyzer.db"
     secret_key: SecretStr = SecretStr("dev-insecure-change-me")
     secure_cookies: bool = False

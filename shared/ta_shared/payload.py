@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 class Hit(BaseModel):
     x_canon: float
     y_canon: float
-    confidence: float | None = None  # always None for manual clicks
+    confidence: float | None = None
 
 
 class SessionMeta(BaseModel):
