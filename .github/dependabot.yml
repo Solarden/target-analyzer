@@ -1,0 +1,20 @@
+# Dependabot configuration.
+# https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # Python dependencies (managed by uv via uv.lock).
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      # Bundle minor/patch bumps into one PR to cut noise on a solo project.
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Add when the manifests exist (mirrors EA): "docker" once the P6 deploy
+  # Dockerfile lands, "github-actions" once workflows exist under .github/workflows.
