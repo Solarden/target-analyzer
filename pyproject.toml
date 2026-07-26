@@ -39,6 +39,12 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.8",
     "pre-commit>=4.0",
+    # fastapi.testclient's transport. Listed here rather than taken from the client
+    # extra, so the suite never depends on OpenCV being installed to run.
+    # ponytail: starlette deprecates httpx for TestClient in favour of httpx2
+    # (github.com/pydantic/httpx2) — a one-line swap here plus the client extra in P4,
+    # when ship.py picks its client and both sides can move together.
+    "httpx>=0.28",
 ]
 
 [build-system]
