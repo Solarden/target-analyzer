@@ -1,7 +1,7 @@
 # Run `uv run pre-commit install` once to enable. See README.
-# djlint (Jinja templates), hadolint (Dockerfile) and an alembic-check hook are
-# deliberately omitted until their targets exist — added alongside the code they
-# guard: the dashboard (P5), the Docker image (P6), the first migration (P1).
+# djlint (Jinja templates) and hadolint (Dockerfile) are deliberately omitted until
+# their targets exist — added alongside the code they guard: the dashboard (P5) and
+# the Docker image (P6).
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -42,3 +42,13 @@ repos:
     rev: v8.30.0
     hooks:
       - id: gitleaks
+
+  - repo: local
+    hooks:
+      # Fail if models drifted from migrations (autogenerate would be non-empty).
+      - id: alembic-check
+        name: alembic check (model/migration drift)
+        entry: scripts/alembic_check.sh
+        language: script
+        pass_filenames: false
+        files: ^(server/target_analyzer/models\.py$|alembic/)

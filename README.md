@@ -5,9 +5,10 @@ it, mark the hits, and track score + group/precision metrics over time. The
 deeper goal is a sandbox for image interpretation — comparing classic CV, a VLM,
 and a custom YOLO on identical data.
 
-> **Status: pre-implementation.** This repo is the P0 scaffold — structure,
-> tooling, and the shared wire contract. The build proceeds phase by phase.
-> Design and roadmap notes live in the maintainer's private docs (symlinked
+> **Status: early.** In place so far: the shared wire contract, the full database
+> schema, and the scoring/metrics core (rings, group size, precision, bias). Not
+> yet: the HTTP API, the Mac client, and the dashboard. The build proceeds phase by
+> phase. Design and roadmap notes live in the maintainer's private docs (symlinked
 > locally at `internal_docs/`, not part of this public repo).
 
 ## Architecture

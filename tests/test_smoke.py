@@ -2,6 +2,9 @@
 
 from datetime import date
 
+import pytest
+from pydantic import ValidationError
+
 import ta_shared
 import target_analyzer
 from ta_shared.payload import Hit, SessionMeta, ShipPayload
@@ -27,3 +30,12 @@ def test_ship_payload_roundtrips():
     )
 
     assert ShipPayload.model_validate_json(payload.model_dump_json()) == payload
+
+
+@pytest.mark.parametrize("coordinate", [float("inf"), float("-inf"), float("nan")])
+def test_non_finite_coordinates_never_reach_the_server(coordinate):
+    """A non-finite coordinate would score as a miss and then break the JSON that
+    carries the metrics — it has to die at the contract.
+    """
+    with pytest.raises(ValidationError):
+        Hit(x_canon=coordinate, y_canon=500.0)
