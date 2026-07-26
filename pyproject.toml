@@ -57,6 +57,11 @@ testpaths = ["tests"]
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]
 
+[tool.bandit.assert_used]
+# Asserts in these modules are deliberate self-checks (`python -m <module>`), run to
+# prove an invariant on a box without pytest — never a security control.
+skips = ["*/scoring.py", "*/selfcheck.py"]
+
 [tool.ruff]
 line-length = 100
 src = ["shared", "client", "server", "tests"]

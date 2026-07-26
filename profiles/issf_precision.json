@@ -4,7 +4,7 @@
   "canon_size_px": 1000,
   "n_rings": 10,
   "ring_radii_px": [50, 100, 150, 200, 250, 300, 350, 400, 450, 500],
-  "target_diam_mm": 170.0,
+  "target_diam_mm": 155.5,
   "board": {
     "aruco_dict": "DICT_4X4_50",
     "markers": {
