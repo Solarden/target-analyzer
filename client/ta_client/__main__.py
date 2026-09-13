@@ -1,0 +1,109 @@
+"""One photo, end to end: ``python -m ta_client <photo> --gun … --distance …``.
+See internal_docs/implementation.md §9.
+
+Load, register, mark the holes, package. The result is a session folder on disk; the
+shipping half of the pipeline reads it from there.
+"""
+
+import argparse
+import sys
+import time
+from datetime import date
+from pathlib import Path
+
+import cv2
+from pydantic import ValidationError
+
+from ta_client.hits import pick_hits
+from ta_client.load import load_stripped
+from ta_client.package import build_payload, write_session_dir
+from ta_client.register import register_interactive
+from ta_shared.payload import SessionMeta
+from ta_shared.profile import load_profile
+
+DEFAULT_OUT = Path("out")
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="ta_client", description=__doc__.splitlines()[0])
+    parser.add_argument("photo", type=Path)
+    parser.add_argument("--gun", required=True)
+    parser.add_argument("--distance", type=float, required=True, metavar="METRES")
+    parser.add_argument(
+        "--date",
+        type=date.fromisoformat,
+        default=date.today(),
+        metavar="YYYY-MM-DD",
+        help="the day it was shot (default: today) — EXIF is stripped, so it cannot be derived",
+    )
+    parser.add_argument("--notes", default="")
+    # No default: the profile is the scoring geometry, and picking the wrong one produces
+    # a complete, plausible session with every hit in the wrong ring and nothing to say so.
+    parser.add_argument(
+        "--profile", type=Path, required=True, help="path to the target profile JSON"
+    )
+    parser.add_argument(
+        "--out", type=Path, default=DEFAULT_OUT, metavar="DIR", help="where the session folder goes"
+    )
+    args = parser.parse_args(argv)
+
+    if not args.profile.is_file():
+        parser.error(f"no profile at {args.profile} — run from the repo root, or pass --profile")
+
+    profile = load_profile(args.profile)
+
+    # Built before anything interactive: a bad --distance or an over-long --gun is a
+    # pydantic error, and raising it after a session has been clicked throws that work away.
+    try:
+        session = SessionMeta(
+            gun=args.gun,
+            distance_m=args.distance,
+            notes=args.notes,
+            shot_at=args.date,
+            target_profile=profile.name,
+            target_profile_version=profile.version,
+        )
+    except ValidationError as exc:
+        # Field names, not flag names: --distance carries distance_m, and inventing a flag
+        # that does not exist would be worse than making the reader map one to the other.
+        parser.error("; ".join(f"{e['loc'][0]}: {e['msg']}" for e in exc.errors()))
+
+    photo, original_jpg, digest = load_stripped(args.photo)
+    registration = register_interactive(photo, profile)
+
+    if registration is None:
+        print("registration cancelled", file=sys.stderr)
+
+        return 1
+
+    hits = pick_hits(registration.normalized, profile)
+
+    if hits is None:
+        print("marking cancelled", file=sys.stderr)
+
+        return 1
+
+    payload = build_payload(
+        image_sha256=digest,
+        profile=profile,
+        registration=registration,
+        hits=hits,
+        session=session,
+    )
+    ok, buffer = cv2.imencode(".png", registration.normalized)
+
+    if not ok:
+        raise ValueError("could not encode the normalized image")
+
+    # Epoch-prefixed and hash-tagged: the outbox orders folders by name and recognises a
+    # session it already holds by the hash.
+    destination = args.out / f"{int(time.time())}-{digest[:12]}"
+    write_session_dir(destination, payload, buffer.tobytes(), original_jpg)
+    print(f"{len(hits)} hits · {registration.summary(profile)}")
+    print(f"{digest[:12]} -> {destination}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

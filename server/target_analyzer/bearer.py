@@ -18,9 +18,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from target_analyzer.config import get_settings
 
-# auto_error=False so a missing header reaches us as None and gets the same 401 as a
-# wrong one — FastAPI's own default would raise a 403 instead, which reads as "your
-# token is fine but you lack rights" and would send the Mac client down a wrong path.
+# auto_error=False so a missing header gets the same 401 as a wrong one. FastAPI's
+# default 403 would read as "your token is fine but you lack rights", which it is not.
 _bearer = HTTPBearer(auto_error=False)
 
 

@@ -23,7 +23,7 @@ services:
     ports:
       # Loopback only — a throwaway DB with dummy credentials must not be reachable
       # from the LAN. 55433 so it never collides with a real Postgres, nor with
-      # expense-analyzer's test database on 55432 (both suites can run at once).
+      # a port of its own, so another project's test database can keep 55432.
       - "127.0.0.1:55433:5432"
     tmpfs:
       # RAM-backed data dir: fast, and a clean slate on every start. postgres:18 moved

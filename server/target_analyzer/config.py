@@ -8,9 +8,8 @@ from pathlib import Path
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Sentinel default for secret_key. Once the dashboard's cookie sessions land (P5)
-# the app refuses to start with this value outside debug. Not a real secret (it is
-# the *rejected* placeholder), so silence bandit B105.
+# The placeholder secret_key that the app rejects outside debug once cookie sessions
+# exist. A value to be refused, not a credential, hence the bandit silence.
 INSECURE_DEFAULT_SECRET = "dev-insecure-change-me"  # nosec B105
 
 

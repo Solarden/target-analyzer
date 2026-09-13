@@ -47,7 +47,8 @@ jobs:
         with:
           enable-cache: true
 
-      # No --extra client: OpenCV is a heavy wheel and nothing under test imports it.
+      # No --extra client here: OpenCV is a heavy wheel, and the client is verified by
+      # its own self-check in the `client` job below.
       - run: uv sync --extra dev --extra server
 
       - run: uv run ruff check --output-format=github .
@@ -57,3 +58,20 @@ jobs:
 
       # Fail if the models drifted from the migrations (the pre-commit hook, in CI).
       - run: scripts/alembic_check.sh
+
+  # The client half: OpenCV only, no database, no pytest. Its self-check is headless by
+  # design, so it runs here exactly as it runs on the Mac — which is what catches an
+  # ArUco API rename in a Dependabot bump before it reaches a range trip.
+  client:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: true
+
+      - run: uv sync --extra client
+
+      - run: uv run python -m ta_client.selfcheck
