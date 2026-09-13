@@ -20,11 +20,10 @@ import numpy as np
 # ponytail: a larger display just gets a smaller window than it could have.
 MAX_DISPLAY_PX = 1400
 GRAB_PX = 12  # click within this (on screen) to drag an existing point instead of adding one
-# A shrunk photo hides exactly the detail a corner has to be placed on, so the pixels
-# under the cursor are magnified in a corner of the window. The window is measured in
-# *displayed* pixels, so the magnification a person sees does not change with the size
-# of the photo they happened to take.
+# A shrunk photo hides the detail a corner has to land on, so the pixels under the
+# cursor are magnified into a corner of the window.
 LOUPE_PX = 200
+# Measured in *displayed* pixels, so the magnification does not change with photo size.
 LOUPE_WINDOW_PX = 44
 POINT_COLOUR = (0, 140, 255)
 READY_COLOUR = (0, 190, 0)

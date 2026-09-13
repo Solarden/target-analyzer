@@ -7,7 +7,7 @@ the thing being hashed or shipped.
 """
 
 import hashlib
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 
@@ -49,7 +49,9 @@ def _decode_via_sips(path: Path) -> np.ndarray:
         converted = Path(tmp) / "converted.jpg"
         # ponytail: macOS-only, which the Mac client already is. A cross-platform client
         # would need pillow-heif and the dependency that comes with it.
-        done = subprocess.run(  # nosec B603 - fixed absolute binary, argv list, no shell
+        # Fixed absolute binary, argv list, no shell. Everything after nosec is parsed as
+        # a test id, so the reason for it lives here rather than on that line.
+        done = subprocess.run(  # nosec B603
             [SIPS, "-s", "format", "jpeg", str(path), "--out", str(converted)],
             capture_output=True,
             check=False,
