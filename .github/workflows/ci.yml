@@ -43,7 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v9
+      # An exact release, not a major tag: setup-uv stopped publishing moving major tags
+      # after v7, so `@v8` and up resolve to nothing and fail the run before it starts.
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
 
@@ -68,7 +70,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v9
+      # An exact release, not a major tag: setup-uv stopped publishing moving major tags
+      # after v7, so `@v8` and up resolve to nothing and fail the run before it starts.
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
 
