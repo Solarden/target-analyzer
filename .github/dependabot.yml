@@ -16,5 +16,12 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
 
-  # Add when the manifests exist (mirrors EA): "docker" once the P6 deploy
-  # Dockerfile lands, "github-actions" once workflows exist under .github/workflows.
+  # The CI workflow's own actions.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+
+  # Add "docker" once the P6 deploy Dockerfile lands (mirrors EA).

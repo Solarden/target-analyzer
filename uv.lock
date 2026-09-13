@@ -1190,6 +1190,7 @@ client = [
     { name = "opencv-contrib-python" },
 ]
 dev = [
+    { name = "httpx" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
@@ -1213,6 +1214,7 @@ requires-dist = [
     { name = "bcrypt", marker = "extra == 'server'", specifier = ">=4.2" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'client'", specifier = ">=0.28" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28" },
     { name = "itsdangerous", marker = "extra == 'server'", specifier = ">=2.2" },
     { name = "jinja2", marker = "extra == 'server'", specifier = ">=3.1" },
     { name = "opencv-contrib-python", marker = "extra == 'client'", specifier = ">=4.10" },

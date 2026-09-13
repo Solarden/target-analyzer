@@ -6,9 +6,10 @@ deeper goal is a sandbox for image interpretation — comparing classic CV, a VL
 and a custom YOLO on identical data.
 
 > **Status: early.** In place so far: the shared wire contract, the full database
-> schema, and the scoring/metrics core (rings, group size, precision, bias). Not
-> yet: the HTTP API, the Mac client, and the dashboard. The build proceeds phase by
-> phase. Design and roadmap notes live in the maintainer's private docs (symlinked
+> schema, the scoring/metrics core (rings, group size, precision, bias), and the
+> ingest API — `POST /api/ingest` behind a machine bearer token, idempotent on the
+> image's sha256. Not yet: the Mac client and the dashboard. The build proceeds phase
+> by phase. Design and roadmap notes live in the maintainer's private docs (symlinked
 > locally at `internal_docs/`, not part of this public repo).
 
 ## Architecture
@@ -42,12 +43,28 @@ tests/
 ```
 uv sync --extra dev --extra server --extra client
 uv run pre-commit install
+docker compose -f docker-compose.test.yml up -d --wait   # throwaway Postgres for the tests
 uv run pytest
 ```
 
 - Dev database is SQLite (zero setup); production is the shared Postgres on the Pi.
+  The DB-backed tests run against a throwaway Postgres for dialect parity — set
+  `TA_TEST_DATABASE_URL` to a SQLite URL for a docker-less run.
 - Config is environment-driven (`TA_*`). Copy `.env.example` to `.env` for local
   overrides — real secrets never live in the repo.
+
+### Running the server
+
+```
+uv run alembic upgrade head
+uv run python -m target_analyzer.seed_profile profiles/issf_precision.json
+uv run python -m target_analyzer.create_token   # token -> the Mac, hash -> TA_INGEST_TOKEN_HASH
+uv run uvicorn target_analyzer.main:app --reload
+```
+
+A target profile must be seeded before anything can be ingested: it is the geometry
+the server scores against, and profiles are immutable and versioned, so re-measuring
+the physical target bumps the version rather than editing the old row.
 
 ## License
 

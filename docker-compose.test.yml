@@ -1,0 +1,40 @@
+# Throwaway PostgreSQL for the test suite — production runs on the Pi's Postgres, so
+# the DB-backed tests exercise the same dialect. NOT part of the app stack: data lives
+# on tmpfs and dies with the container.
+#
+#   docker compose -f docker-compose.test.yml up -d --wait    # start
+#   docker compose -f docker-compose.test.yml down            # stop and discard
+#
+# Docker-less runs remain possible: TA_TEST_DATABASE_URL=sqlite:///... uv run pytest
+# (and tests/test_scoring.py + test_smoke.py need no database at all).
+
+# Own project name — without it this file shares the default project with the app
+# compose, and a `compose down --remove-orphans` would kill the test database.
+name: target-analyzer-test
+
+services:
+  test-db:
+    # Major matches the production server — bump both together.
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ta_test
+      POSTGRES_USER: ta_test
+      POSTGRES_PASSWORD: ta_test
+    ports:
+      # Loopback only — a throwaway DB with dummy credentials must not be reachable
+      # from the LAN. 55433 so it never collides with a real Postgres, nor with
+      # expense-analyzer's test database on 55432 (both suites can run at once).
+      - "127.0.0.1:55433:5432"
+    tmpfs:
+      # RAM-backed data dir: fast, and a clean slate on every start. postgres:18 moved
+      # PGDATA up a level (/var/lib/postgresql/<major>/docker), so the mount has to be
+      # the parent — /var/lib/postgresql/data only covered <=17.
+      - /var/lib/postgresql
+    healthcheck:
+      # -h 127.0.0.1 probes TCP, not the unix socket — the socket also answers during
+      # the entrypoint's TEMPORARY init server, which would let `up --wait` return
+      # before the real server is listening on the port.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ta_test -d ta_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
