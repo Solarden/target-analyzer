@@ -31,8 +31,10 @@ server = [
 ]
 # Mac processing client: OpenCV does homography + the click UI + decode/EXIF strip
 # (opencv-contrib bundles cv2.aruco for the marker board); httpx ships to the Pi.
+# Pinned to 5.x because that is where the ArUco free functions are gone and only the
+# ArucoDetector class API exists, which is what register.py is written against.
 client = [
-    "opencv-contrib-python>=4.10",
+    "opencv-contrib-python>=5.0",
     "httpx>=0.28",
 ]
 dev = [

@@ -8,13 +8,14 @@ from target_analyzer.db import get_engine
 router = APIRouter(tags=["meta"])
 
 
+# Also the container healthcheck, which only marks the container unhealthy rather than
+# restarting it. Kept out of the docstring: that text is published in the OpenAPI schema.
 @router.get("/health")
 def health() -> JSONResponse:
-    """Liveness + DB reachability check (also the Docker healthcheck in P6).
+    """Report whether the service is running and its database is reachable.
 
-    503 when the database is unreachable — it is a server that can go down
-    independently of the app, and an ingest endpoint with nowhere to persist is not
-    healthy. Docker only *marks* the container unhealthy (no restart loop).
+    Returns 503 when the database cannot be reached: the service cannot store anything
+    without it, so it is not healthy.
     """
     db_ok = True
 

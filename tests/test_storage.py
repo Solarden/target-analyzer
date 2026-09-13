@@ -15,14 +15,13 @@ from target_analyzer import storage
         (make_jpeg(), "image/jpeg"),
         (make_png(8), "image/png"),
         (b"RIFF\x24\x00\x00\x00WEBPVP8 ", "image/webp"),
-        # Everything below is what an attacker actually sends: a real file type wearing
-        # an image's filename. The declared Content-Type is never consulted, so the
-        # only thing standing here is the signature.
+        # A real file type wearing an image's filename: the declared Content-Type is never
+        # consulted, so the signature is the only thing standing in the way.
         (b"MZ\x90\x00", None),  # PE executable
         (b"\x7fELF\x02\x01\x01", None),  # ELF binary
         (b"<html><body>hi</body></html>", None),
         (b"PK\x03\x04", None),  # zip / docx container
-        (b"%PDF-1.7", None),  # allowed in EA, not here
+        (b"%PDF-1.7", None),  # a document, not an image
         (b"RIFF\x24\x00\x00\x00WAVEfmt ", None),  # RIFF, but not WebP
         (b"", None),
     ],

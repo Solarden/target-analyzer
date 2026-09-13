@@ -6,11 +6,12 @@ deeper goal is a sandbox for image interpretation — comparing classic CV, a VL
 and a custom YOLO on identical data.
 
 > **Status: early.** In place so far: the shared wire contract, the full database
-> schema, the scoring/metrics core (rings, group size, precision, bias), and the
-> ingest API — `POST /api/ingest` behind a machine bearer token, idempotent on the
-> image's sha256. Not yet: the Mac client and the dashboard. The build proceeds phase
-> by phase. Design and roadmap notes live in the maintainer's private docs (symlinked
-> locally at `internal_docs/`, not part of this public repo).
+> schema, the scoring/metrics core (rings, group size, precision, bias), the ingest
+> API — `POST /api/ingest` behind a machine bearer token, idempotent on the image's
+> sha256 — and the Mac client up to packaging a session. Not yet: shipping that
+> session over the network, and the dashboard. The build proceeds phase by phase.
+> Design and roadmap notes live in the maintainer's private docs (symlinked locally
+> at `internal_docs/`, not part of this public repo).
 
 ## Architecture
 
@@ -47,7 +48,7 @@ docker compose -f docker-compose.test.yml up -d --wait   # throwaway Postgres fo
 uv run pytest
 ```
 
-- Dev database is SQLite (zero setup); production is the shared Postgres on the Pi.
+- Dev database is SQLite (zero setup); production is Postgres.
   The DB-backed tests run against a throwaway Postgres for dialect parity — set
   `TA_TEST_DATABASE_URL` to a SQLite URL for a docker-less run.
 - Config is environment-driven (`TA_*`). Copy `.env.example` to `.env` for local
@@ -65,6 +66,28 @@ uv run uvicorn target_analyzer.main:app --reload
 A target profile must be seeded before anything can be ingested: it is the geometry
 the server scores against, and profiles are immutable and versioned, so re-measuring
 the physical target bumps the version rather than editing the old row.
+
+### Running the client
+
+```
+uv run python -m ta_client.board profiles/issf_precision.json --out board.svg
+uv run python -m ta_client.selfcheck
+uv run python -m ta_client photo.jpg --gun "CZ 75" --distance 25 --profile profiles/issf_precision.json
+```
+
+Print `board.svg` at 100% — it is in millimetres, and the calibration line on it must
+measure 50 mm with a ruler, or the rings on paper will not match the profile the server
+scores against. Photograph the target so the whole sheet is in frame, then run the
+pipeline: it warps the photo into the canonical frame, asks you to confirm the rings
+landed on the printed ones, and lets you click the holes. The result is a session
+folder under `out/` (gitignored — it holds real photos) — sending it to the server is
+the next phase.
+
+`--profile` has no default on purpose: it is the geometry every hit is scored against,
+and the wrong one produces a complete, plausible session in which every shot is in the
+wrong ring.
+
+macOS only: HEIC photos are converted with `sips` on the way in.
 
 ## License
 

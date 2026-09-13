@@ -230,3 +230,10 @@ internal_docs
 .env
 # Locally stored originals / normalized target images during dev.
 /data/
+
+# Session folders written by `python -m ta_client`: a target photo, its warped copy and
+# the payload. Real shooting data, never part of the public repo.
+out/
+
+# Working notes for the coding assistant. Local to this checkout.
+CLAUDE.md

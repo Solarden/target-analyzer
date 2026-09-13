@@ -1,7 +1,6 @@
 """On-disk image storage and the upload trust boundary (implementation.md §7.4-§7.6, §12).
 
-Derived from expense-analyzer's ``attachments.py``; the two rules it bakes in carry over
-unchanged, and a third is added because these files are images rather than documents:
+Three rules hold here, the last of them because every file is an image:
 
 - **Trust the bytes, not the client.** A file's type is decided by sniffing its magic
   bytes (:func:`sniff_content_type`), never by the declared ``Content-Type``. Anything
@@ -24,9 +23,8 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-# Sniff-signature -> canonical extension. This map is the security allowlist (kept in
-# code, not env): an upload must match one of these *by content* to be accepted. No PDF
-# — unlike EA's loan documents, everything here is a photograph or a rendered target.
+# The security allowlist, in code rather than in env: an upload must match one of these
+# signatures by content to be accepted. Everything stored here is a photograph or a render.
 ALLOWED_IMAGE_TYPES: dict[str, str] = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -34,7 +32,7 @@ ALLOWED_IMAGE_TYPES: dict[str, str] = {
 }
 
 # Decompression-bomb ceiling. A 48 MP phone photo is ~48e6; 64e6 leaves headroom for a
-# high-res scan while staying far under what would exhaust a Raspberry Pi.
+# high-res scan while staying far under what would exhaust a small server.
 MAX_PIXELS = 64_000_000
 
 
@@ -77,9 +75,8 @@ def decode_verified(data: bytes) -> tuple[int, int]:
             if width * height > MAX_PIXELS:
                 raise ValueError(f"image is {width}x{height}, over the {MAX_PIXELS} pixel cap")
 
-            # verify() walks the whole file and catches truncation/corruption, but it
-            # leaves the instance unusable — hence the size read above, and the reopen
-            # in strip_metadata rather than reusing this handle.
+            # verify() catches truncation but leaves the instance unusable, which is why
+            # the size is read above and strip_metadata reopens rather than reusing this.
             img.verify()
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise ValueError(f"not a decodable image: {exc}") from exc
@@ -95,13 +92,12 @@ def strip_metadata(data: bytes, content_type: str) -> bytes:
     holds if a future client forgets — GPS coordinates of a shooting spot are exactly
     the kind of thing that must not be one path-traversal away from leaking.
 
-    Every branch re-encodes without growing the file, because the whole stack lives on
-    one LUKS SSD whose backup job is still post-MVP:
+    Every branch re-encodes without growing the file, because storage is finite:
 
     - JPEG: ``quality="keep"`` reuses the source quantization tables, so the metadata
       dies and the pixels do not. These originals are Phase-3 YOLO training data.
-    - PNG: no ``optimize`` — it costs a zlib-9 filter search on every ingest, on a
-      Raspberry Pi, to shave a few percent off an image that is already synthetic.
+    - PNG: no ``optimize`` — a zlib-9 filter search on every ingest, on a small server,
+      to shave a few percent off an image that is already synthetic.
     - WebP: high-quality lossy. Pillow does not report whether the source was lossless,
       and forcing ``lossless=True`` would *inflate* a lossy phone WebP several times
       over — so the lossy branch is the one that cannot hurt. A lossless WebP original

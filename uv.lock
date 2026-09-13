@@ -1217,7 +1217,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28" },
     { name = "itsdangerous", marker = "extra == 'server'", specifier = ">=2.2" },
     { name = "jinja2", marker = "extra == 'server'", specifier = ">=3.1" },
-    { name = "opencv-contrib-python", marker = "extra == 'client'", specifier = ">=4.10" },
+    { name = "opencv-contrib-python", marker = "extra == 'client'", specifier = ">=5.0" },
     { name = "pillow", marker = "extra == 'server'", specifier = ">=11.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'server'", specifier = ">=3.2" },

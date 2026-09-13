@@ -1,7 +1,7 @@
-"""Engine + session factory. Copied from expense-analyzer and kept dialect-aware.
+"""Engine + session factory, dialect-aware.
 
-Dev runs on SQLite (zero setup), the Pi runs on the shared Postgres — one model set
-serves both because every column type in models.py is generic (see §5).
+Dev runs on SQLite (zero setup), production on Postgres — one model set serves both
+because every column type in models.py is generic (see §5).
 """
 
 from collections.abc import Iterator
@@ -38,8 +38,7 @@ def get_engine() -> Engine:
 
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, _connection_record):
-            # WAL mode for write safety and better concurrency. foreign_keys is off by
-            # default in SQLite and must be enabled per-connection — without it the
+            # SQLite leaves foreign_keys off per connection, and without it the
             # ON DELETE CASCADE on image/interpretation/hole is silently inert.
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
@@ -49,9 +48,8 @@ def get_engine() -> Engine:
 
         return engine
 
-    # Server database (PostgreSQL). Small fixed pool. pre_ping matters: the database
-    # lives in a separate compose stack and can restart independently of the app, so
-    # stale pooled connections must be detected, not crashed on.
+    # pre_ping because the database restarts independently of the app: a stale pooled
+    # connection has to be detected rather than crashed on.
     return create_engine(
         settings.database_url,
         echo=settings.debug,

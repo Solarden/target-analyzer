@@ -4,9 +4,9 @@ The DB-backed tests run against a real PostgreSQL by default (prod parity): the
 throwaway container from ``docker-compose.test.yml``. Set ``TA_TEST_DATABASE_URL``
 (e.g. a sqlite URL) for a quick docker-less run.
 
-Unlike expense-analyzer's suite the database fixture is **not autouse** — the scoring
-and contract tests are pure and must keep running with no container up. Only the tests
-that ask for ``db_session`` / ``client`` pay for one.
+The database fixture is deliberately **not autouse**: the scoring and contract tests are
+pure and must keep running with no container up. Only the tests that ask for
+``db_session`` / ``client`` pay for one.
 
 Redirecting the URL here is safe because the engine is built lazily (see
 ``target_analyzer.db.get_engine``) — nothing opens a connection at import time.

@@ -26,24 +26,8 @@ from dataclasses import dataclass
 from itertools import combinations
 from statistics import pstdev
 from types import SimpleNamespace
-from typing import Protocol
 
-from ta_shared.profile import check_ring_geometry
-
-
-class RingGeometry(Protocol):
-    """What scoring needs from "a profile" — the ring geometry, nothing else.
-
-    Satisfied structurally by both :class:`ta_shared.profile.TargetProfile` (the
-    JSON artifact, client-side and at rest) and
-    :class:`target_analyzer.models.TargetProfile` (the DB row the ingest endpoint
-    loads). Neither ever needs converting into the other to be scored.
-    """
-
-    canon_size_px: int
-    n_rings: int
-    ring_radii_px: list[int]
-    target_diam_mm: float | None
+from ta_shared.profile import RingGeometry, check_ring_geometry, mm_per_px
 
 
 def center(profile: RingGeometry) -> tuple[float, float]:
@@ -51,18 +35,6 @@ def center(profile: RingGeometry) -> tuple[float, float]:
     half = profile.canon_size_px / 2
 
     return half, half
-
-
-def mm_per_px(profile: RingGeometry) -> float | None:
-    """Millimetres per canonical pixel, or None when the profile has no physical
-    diameter — then only px metrics are reported.
-
-    ``target_diam_mm`` spans the **outer scoring ring**, i.e. twice its radius.
-    """
-    if profile.target_diam_mm is None:
-        return None
-
-    return profile.target_diam_mm / (2 * profile.ring_radii_px[-1])
 
 
 def ring_for_hit(x: float, y: float, profile: RingGeometry) -> int:
@@ -154,6 +126,7 @@ class ScoreResult:
     def bias_vec_mm(self) -> tuple[float, float] | None:
         if self.bias_vec is None or self.mm_per_px is None:
             return None
+
         dx, dy = self.bias_vec
 
         return dx * self.mm_per_px, dy * self.mm_per_px

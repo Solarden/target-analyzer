@@ -78,7 +78,7 @@ def test_group_metrics_match_the_hand_computed_fixture():
 
 
 def test_bias_of_a_low_right_group_reads_low_right():
-    """The §1 sign guard: x right, y down. A flipped axis inverts the coaching."""
+    """The §1 sign guard. A flipped axis inverts the coaching and nothing else errors."""
     result = compute_metrics(GROUP, PROFILE)
 
     assert result.bias_vec == pytest.approx((3.33, 6.67), abs=0.01)

@@ -30,9 +30,8 @@ from target_analyzer.scoring import compute_metrics
 
 router = APIRouter(prefix="/api", tags=["ingest"], dependencies=[Depends(require_machine)])
 
-# The wire contract's version. Bumped only by a breaking change to ShipPayload; the
-# check exists so a newer client fails loudly against an older Pi instead of having its
-# payload quietly misread.
+# Checked so a newer client fails loudly against an older server rather than having its
+# payload quietly misread. Only a breaking change to ShipPayload moves it.
 SUPPORTED_SCHEMA_VERSION = 1
 
 
@@ -199,10 +198,8 @@ async def ingest(
     normalized_bytes = await _read_capped(normalized, "normalized")
     original_bytes = await _read_capped(original, "original") if original is not None else None
 
-    # Identity. With the original in hand the client's hash is verifiable, so verify it;
-    # shipping the original is optional (§3), and without it the client's hash is all
-    # there is. Either way this is the hash of the bytes the *client* stripped — the copy
-    # written to disk is re-encoded below and deliberately will not match it.
+    # Always the hash of the bytes the *client* stripped; the copy written to disk is
+    # re-encoded below and deliberately will not match it. The original is optional (§3).
     if original_bytes is not None:
         recomputed = hashlib.sha256(original_bytes).hexdigest()
 
@@ -228,12 +225,8 @@ def _ingest_onto_existing_image(
     ship: ShipPayload,
 ) -> dict:
     """This photo is already known: either a replay, or a second method reading it."""
-    # The frame contract on the one path that cannot pixel-check it. There is no render
-    # to measure here — the images on disk were warped when the image row was created —
-    # so the stored canon_size_px is the only witness. Without this, a payload naming a
-    # *different* profile version (one whose canonical square is a different size) would
-    # pass the payload-vs-profile check above and then score hits against geometry the
-    # image on disk was never warped to.
+    # Nothing to measure on this path — the images on disk were warped when the image row
+    # was created — so the stored canon_size_px is the frame contract's only witness here.
     if ship.canon_size_px != image.canon_size_px:
         raise _bad_request(
             f"canon_size_px {ship.canon_size_px} does not match the frame this image was "
@@ -253,10 +246,8 @@ def _ingest_onto_existing_image(
 
         return _body(image.session_id, image, duplicate, duplicate=True)
 
-    # Same photo, a method that has not read it yet — the Phase-2 path. Unreachable
-    # while `method` is Literal["manual"], but it is what UNIQUE(image_id, method)
-    # exists for, and it is the row the Compare view will render side by side. No new
-    # files: the images on disk belong to the image row, not to one reading of it.
+    # Same photo, a method that has not read it yet: one more interpretation, no new
+    # files. The images on disk belong to the image row, not to one reading of it.
     interpretation = _add_interpretation(session, image.id, profile, ship)
     session.commit()
     session.refresh(interpretation)
@@ -339,15 +330,15 @@ def _ingest_new_image(
         session.flush()
 
         interpretation = _add_interpretation(session, image.id, profile, ship)
-        # ponytail: a concurrent POST of the same sha256 raises IntegrityError here and
-        # 500s. The shipper is one Mac flushing its outbox in FIFO order, so there is no
-        # second writer; if that ever changes, catch it and re-read as a duplicate.
+        # ponytail: a concurrent POST of the same sha256 raises IntegrityError and 500s.
+        # One Mac flushes in order, so there is no second writer; if that changes, catch it.
         session.commit()
     except Exception:
         session.rollback()
 
         for path in written:
             storage.delete(data_path, path)
+
         raise
 
     session.refresh(image)
