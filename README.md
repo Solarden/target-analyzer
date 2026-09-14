@@ -8,8 +8,10 @@ and a custom YOLO on identical data.
 > **Status: early.** In place so far: the shared wire contract, the full database
 > schema, the scoring/metrics core (rings, group size, precision, bias), the ingest
 > API — `POST /api/ingest` behind a machine bearer token, idempotent on the image's
-> sha256 — and the Mac client end to end, from photo to a shipped session, with an
-> offline outbox behind it. Not yet: the dashboard. The build proceeds phase by phase.
+> sha256 — the Mac client end to end, from photo to a shipped session, with an offline
+> outbox behind it, and the dashboard behind a login: score and precision over time,
+> the target rendered with its holes, and one photo's readings side by side. Not yet:
+> deployment, and anything that reads the holes for you. The build proceeds phase by phase.
 
 ## Architecture
 
@@ -58,12 +60,31 @@ uv run pytest
 uv run alembic upgrade head
 uv run python -m target_analyzer.seed_profile profiles/issf_precision.json
 uv run python -m target_analyzer.create_token   # token -> the Mac, hash -> TA_INGEST_TOKEN_HASH
+uv run python -m target_analyzer.create_user --username alice --name "Alice"
 uv run uvicorn target_analyzer.main:app --reload
 ```
 
 A target profile must be seeded before anything can be ingested: it is the geometry
 the server scores against, and profiles are immutable and versioned, so re-measuring
 the physical target bumps the version rather than editing the old row.
+
+The dashboard is at `/dashboard`, behind the login. There is no public registration —
+`create_user` is how an account is made. Set `TA_SECRET_KEY` to a long random value
+before starting: the app refuses to sign session cookies with the placeholder unless
+`TA_DEBUG=true`.
+
+### The dashboard's CSS
+
+`static/app.css` is generated from `tailwind.css` and **committed**, so running the app
+needs no build step. After changing a template, rebuild it:
+
+```
+make css
+```
+
+The Tailwind standalone CLI is downloaded into `tools/` on demand (gitignored); no Node
+is involved. Chart.js is vendored in `static/` for the same reason — nothing on this
+dashboard is fetched from a CDN.
 
 ### Running the client
 

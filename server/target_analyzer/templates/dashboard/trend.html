@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Trend — target-analyzer{% endblock %}
+{% block content %}
+  <form class="filters" method="get" action="/dashboard">
+    <label for="gun">Gun</label>
+    <select id="gun" name="gun" onchange="this.form.submit()">
+      <option value="">All</option>
+      {% for gun in guns %}
+        <option value="{{ gun }}" {% if gun == f_gun %}selected{% endif %}>{{ gun }}</option>
+      {% endfor %}
+    </select>
+    <label for="distance">Distance</label>
+    <select id="distance" name="distance" onchange="this.form.submit()">
+      <option value="">All</option>
+      {% for distance in distances %}
+        <option value="{{ distance }}"
+                {% if distance | string == f_distance %}selected{% endif %}>{{ distance | m }} m</option>
+      {% endfor %}
+    </select>
+    <noscript>
+      <button type="submit">Apply</button>
+    </noscript>
+  </form>
+  {% if rows %}
+    <div class="panel">
+      <canvas id="trend" height="110"></canvas>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Shot</th>
+          <th>Gun</th>
+          <th>Distance</th>
+          <th>Holes</th>
+          <th>Total</th>
+          <th>Mean radius</th>
+          <th>Spread</th>
+          <th>Bias</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for interpretation, session in rows %}
+          <tr>
+            <td>
+              <a href="/dashboard/session/{{ session.id }}">{{ (session.shot_at or interpretation.created_at) | day }}</a>
+            </td>
+            <td>{{ session.gun }}</td>
+            <td>{{ session.distance_m | m }} m</td>
+            <td>{{ interpretation.n_holes }}</td>
+            <td>{{ interpretation.total_score }}</td>
+            <td>{{ interpretation.mean_radius_mm | mm }}</td>
+            <td>{{ interpretation.extreme_spread_mm | mm }}</td>
+            <td>{{ interpretation.bias_mm | mm }} {{ interpretation.metrics.bias_direction or "" }}</td>
+            <td class="notes">{{ session.notes }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <script id="trend-data" type="application/json">{{ chart | tojson }}</script>
+    <script src="/static/chart.min.js"></script>
+    <script src="/static/chart-theme.js"></script>
+    <script src="/static/trend.js"></script>
+  {% else %}
+    {% if f_gun or f_distance %}
+      <p class="muted">No sessions match these filters.</p>
+    {% else %}
+      <p class="muted">No sessions yet. Ship one from the Mac client and it lands here.</p>
+    {% endif %}
+  {% endif %}
+{% endblock %}

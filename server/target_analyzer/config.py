@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./target_analyzer.db"
     secret_key: SecretStr = SecretStr(INSECURE_DEFAULT_SECRET)
     secure_cookies: bool = False
+    # Offered to every dashboard visitor in the footer: the AGPL asks a network-served
+    # app to point its users at the source it is actually running.
+    source_url: str = "https://github.com/Solarden/target-analyzer"
     # sha256 of the machine bearer token (never the token itself). Unset -> ingest 503.
     ingest_token_hash: str | None = None
     data_path: Path = Path("data")

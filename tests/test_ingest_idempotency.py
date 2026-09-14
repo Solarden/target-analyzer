@@ -13,25 +13,11 @@ import pytest
 from fastapi import HTTPException, Response, status
 from PIL import Image as PILImage
 from sqlmodel import Session, func, select
-from tests.conftest import make_jpeg, make_payload, make_png
+from tests.conftest import make_jpeg, make_payload, make_png, post_ingest
 
 from target_analyzer.api.endpoints.ingest import _ingest_onto_existing_image
 from target_analyzer.config import get_settings
 from target_analyzer.models import Hole, Image, Interpretation, ShootingSession
-
-
-def post(client, auth, payload, png, *, jpeg=None):
-    files = {"normalized": ("n.png", png, "image/png")}
-
-    if jpeg is not None:
-        files["original"] = ("o.jpg", jpeg, "image/jpeg")
-
-    return client.post(
-        "/api/ingest",
-        headers=auth,
-        data={"payload": payload.model_dump_json()},
-        files=files,
-    )
 
 
 def count(session: Session, model) -> int:
@@ -45,7 +31,7 @@ def test_a_new_photo_creates_a_session_image_interpretation_and_holes(
     client, auth, profile, db_session, png_bytes
 ):
     jpeg = make_jpeg()
-    response = post(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg)
+    response = post_ingest(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg)
     body = response.json()
 
     assert response.status_code == status.HTTP_201_CREATED
@@ -62,9 +48,9 @@ def test_replaying_the_same_flush_returns_the_existing_rows(
 ):
     """The outbox case: same photo, same method, twice. 409 and nothing new."""
     jpeg = make_jpeg()
-    first = post(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg).json()
+    first = post_ingest(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg).json()
 
-    replay = post(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg)
+    replay = post_ingest(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg)
 
     assert replay.status_code == status.HTTP_409_CONFLICT
     assert replay.json()["duplicate"] is True
@@ -84,7 +70,7 @@ def test_a_second_method_attaches_to_the_same_image(client, auth, profile, db_se
     exists for and what the Compare view will render side by side.
     """
     jpeg = make_jpeg()
-    first = post(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg).json()
+    first = post_ingest(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg).json()
     on_disk = {p for p in get_settings().data_path.rglob("*") if p.is_file()}
 
     ship = make_payload(jpeg)
@@ -110,7 +96,7 @@ def test_a_second_reading_in_a_different_frame_is_rejected(
     disk was never warped to.
     """
     jpeg = make_jpeg()
-    post(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg)
+    post_ingest(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg)
 
     ship = make_payload(jpeg)
     ship.method = "cv_blob"
@@ -139,7 +125,7 @@ def test_a_second_reading_in_a_different_frame_is_rejected(
 )
 def test_bad_or_missing_credentials_are_401(client, profile, png_bytes, headers):
     """A missing header gets the same 401 as a wrong one — never FastAPI's default 403."""
-    response = post(client, headers, make_payload(make_jpeg()), png_bytes)
+    response = post_ingest(client, headers, make_payload(make_jpeg()), png_bytes)
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
@@ -149,7 +135,7 @@ def test_an_unconfigured_server_is_503_not_401(client, auth, profile, png_bytes,
     into a retry loop against a box that can never accept it."""
     monkeypatch.setattr(get_settings(), "ingest_token_hash", None)
 
-    response = post(client, auth, make_payload(make_jpeg()), png_bytes)
+    response = post_ingest(client, auth, make_payload(make_jpeg()), png_bytes)
 
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
 
@@ -159,7 +145,7 @@ def test_an_unconfigured_server_is_503_not_401(client, auth, profile, png_bytes,
 
 def test_a_declared_frame_size_mismatch_is_rejected(client, auth, profile, png_bytes):
     """Half one: warping to a different square than the profile mis-scores every ring."""
-    response = post(client, auth, make_payload(make_jpeg(), canon_size_px=800), png_bytes)
+    response = post_ingest(client, auth, make_payload(make_jpeg(), canon_size_px=800), png_bytes)
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "canon_size_px" in response.json()["detail"]
@@ -167,7 +153,7 @@ def test_a_declared_frame_size_mismatch_is_rejected(client, auth, profile, png_b
 
 def test_a_normalized_render_of_the_wrong_size_is_rejected(client, auth, profile):
     """Half two, the one that actually holds: the payload can claim 1000 all it likes."""
-    response = post(client, auth, make_payload(make_jpeg()), make_png(800))
+    response = post_ingest(client, auth, make_payload(make_jpeg()), make_png(800))
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "800x800" in response.json()["detail"]
@@ -197,8 +183,9 @@ def test_a_hit_outside_the_canonical_frame_is_rejected(client, auth, profile, pn
 
 def test_a_hash_that_does_not_match_the_original_is_rejected(client, auth, profile, png_bytes):
     """With the original in hand the claimed identity is verifiable, so it is verified."""
-    payload = make_payload(make_jpeg())  # hash of one image...
-    response = post(client, auth, payload, png_bytes, jpeg=make_jpeg(size=48))  # ...body of another
+    payload = make_payload(make_jpeg())  # the hash of one image...
+    # ...and the body of another.
+    response = post_ingest(client, auth, payload, png_bytes, jpeg=make_jpeg(size=48))
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "does not match" in response.json()["detail"]
@@ -206,7 +193,7 @@ def test_a_hash_that_does_not_match_the_original_is_rejected(client, auth, profi
 
 def test_an_unknown_profile_is_404(client, auth, db_session, png_bytes):
     """No profile seeded at all — the deploy step that P6 owns."""
-    response = post(client, auth, make_payload(make_jpeg()), png_bytes)
+    response = post_ingest(client, auth, make_payload(make_jpeg()), png_bytes)
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "seed_profile" in response.json()["detail"]
@@ -259,14 +246,15 @@ def test_a_malformed_payload_is_422_not_500(client, auth, png_bytes, raw):
 
 
 def test_a_non_image_upload_is_rejected(client, auth, profile):
-    response = post(client, auth, make_payload(make_jpeg()), b"MZ\x90\x00 this is an executable")
+    executable = b"MZ\x90\x00 this is an executable"
+    response = post_ingest(client, auth, make_payload(make_jpeg()), executable)
 
     assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
 
 def test_the_normalized_part_must_be_png(client, auth, profile):
     """It is the dashboard's overlay surface and is rendered, not photographed."""
-    response = post(client, auth, make_payload(make_jpeg()), make_jpeg(1000))
+    response = post_ingest(client, auth, make_payload(make_jpeg()), make_jpeg(1000))
 
     assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
     assert "image/png" in response.json()["detail"]
@@ -275,7 +263,7 @@ def test_the_normalized_part_must_be_png(client, auth, profile):
 def test_an_oversized_upload_is_rejected(client, auth, profile, png_bytes, monkeypatch):
     monkeypatch.setattr(get_settings(), "attachment_max_bytes", 16)
 
-    response = post(client, auth, make_payload(make_jpeg()), png_bytes)
+    response = post_ingest(client, auth, make_payload(make_jpeg()), png_bytes)
 
     assert response.status_code == status.HTTP_413_CONTENT_TOO_LARGE
 
@@ -288,7 +276,7 @@ def test_exif_is_stripped_from_the_stored_original(client, auth, profile, db_ses
     jpeg = make_jpeg(with_exif=True)
     assert PILImage.open(BytesIO(jpeg)).getexif()
 
-    post(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg)
+    post_ingest(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg)
 
     image = db_session.exec(select(Image)).one()
     stored = get_settings().data_path / image.original_path
@@ -298,7 +286,7 @@ def test_exif_is_stripped_from_the_stored_original(client, auth, profile, db_ses
 
 def test_a_skipped_original_leaves_its_columns_null(client, auth, profile, db_session, png_bytes):
     """TA_SHIP_ORIGINAL is opt-out on the Mac; the normalized render always exists."""
-    post(client, auth, make_payload(make_jpeg()), png_bytes)
+    post_ingest(client, auth, make_payload(make_jpeg()), png_bytes)
 
     image = db_session.exec(select(Image)).one()
 
@@ -321,7 +309,7 @@ def test_a_failed_commit_leaves_no_orphan_files(
     before = {p for p in data_path.rglob("*") if p.is_file()}
 
     with pytest.raises(RuntimeError):
-        post(client, auth, make_payload(make_jpeg()), png_bytes, jpeg=make_jpeg())
+        post_ingest(client, auth, make_payload(make_jpeg()), png_bytes, jpeg=make_jpeg())
 
     assert {p for p in data_path.rglob("*") if p.is_file()} == before
     assert count(db_session, Image) == 0

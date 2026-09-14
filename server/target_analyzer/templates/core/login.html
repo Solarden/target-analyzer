@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Log in — target-analyzer{% endblock %}
+{% block content %}
+  <div class="panel panel-narrow">
+    <h2>Log in</h2>
+    <form method="post" action="/login">
+      <label for="username">Username</label>
+      <input id="username"
+             name="username"
+             autocomplete="username"
+             autofocus
+             required>
+      <label for="password">Password</label>
+      <input id="password"
+             name="password"
+             type="password"
+             autocomplete="current-password"
+             required>
+      <p>
+        <button type="submit">Log in</button>
+      </p>
+    </form>
+  </div>
+{% endblock %}

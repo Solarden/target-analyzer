@@ -55,6 +55,13 @@ jobs:
 
       - run: uv run ruff check --output-format=github .
       - run: uv run ruff format --check .
+      - run: uv run djlint server/target_analyzer/templates --check
+
+      # static/app.css is generated and committed so the image build needs no Node.
+      # Nothing else notices when a template gains a class the built sheet lacks:
+      # every other check passes and the page just renders wrong.
+      - run: make css
+      - run: git diff --exit-code -- server/target_analyzer/static/app.css
 
       - run: uv run pytest
 

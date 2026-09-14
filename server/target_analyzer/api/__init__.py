@@ -6,10 +6,15 @@ here rather than another ``include_router`` in the app factory.
 """
 
 from target_analyzer.api.endpoints import ingest
-from target_analyzer.api.endpoints.core import health
+from target_analyzer.api.endpoints.core import auth, health
+from target_analyzer.api.endpoints.dashboard import compare, image, session, trend
 
-# The dashboard routers (Trend / Session / Compare) join this list in P5.
 routers = (
     health.router,
+    auth.router,
     ingest.router,
+    trend.router,
+    session.router,
+    compare.router,
+    image.router,
 )

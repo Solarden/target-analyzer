@@ -20,7 +20,9 @@ from datetime import date
 from io import BytesIO
 from pathlib import Path
 
+import bcrypt
 import pytest
+from fastapi import status
 from fastapi.testclient import TestClient
 from PIL import Image as PILImage
 from sqlalchemy import text
@@ -29,14 +31,18 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, SQLModel
 
 from ta_shared.payload import Hit, SessionMeta, ShipPayload
+from target_analyzer.auth import hash_password
 from target_analyzer.config import get_settings
-from target_analyzer.main import app
-from target_analyzer.models import TargetProfile
+from target_analyzer.models import TargetProfile, User
+from target_analyzer.queries import users
 from target_analyzer.seed_profile import seed
 
 # The token the suite authenticates with; only its hash is ever configured, exactly as
 # in production. Not a credential — it never leaves this file.
 INGEST_TOKEN = "test-machine-token"  # nosec B105
+# The dashboard login, on the same terms.
+USERNAME = "tester"
+PASSWORD = "secret123"  # nosec B105
 
 _TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="ta-test-"))
 os.environ["TA_DATABASE_URL"] = os.environ.get(
@@ -46,7 +52,11 @@ os.environ["TA_DATABASE_URL"] = os.environ.get(
 # Uploaded images land in a throwaway temp dir, never the real data/.
 os.environ["TA_DATA_PATH"] = str(_TEST_DATA_DIR)
 os.environ["TA_INGEST_TOKEN_HASH"] = hashlib.sha256(INGEST_TOKEN.encode()).hexdigest()
-# os.environ outranks the .env file in pydantic-settings, so a developer's local dotenv
+os.environ["TA_SECRET_KEY"] = "test-secret-not-for-production"  # nosec B105
+# Not optional: over plain http the TestClient drops a Secure cookie, so a developer's
+# local value of true would 303 every authenticated test to /login with no clue why.
+os.environ["TA_SECURE_COOKIES"] = "false"
+# os.environ outranks the dotenv file in pydantic-settings, so a developer's local one
 # cannot leak into the suite through the vars set above.
 get_settings.cache_clear()
 
@@ -104,10 +114,50 @@ def db_session(_database: Engine) -> Iterator[Session]:
         _reset_all_tables(_database)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _fast_bcrypt() -> Iterator[None]:
+    """Hash at the cheapest cost factor for the suite.
+
+    Every login here runs through the real route, and real cost-12 bcrypt makes that
+    the slowest thing in the run.
+    """
+    original = bcrypt.gensalt
+
+    bcrypt.gensalt = lambda rounds=4, prefix=b"2b": original(4, prefix)
+
+    try:
+        yield
+    finally:
+        bcrypt.gensalt = original
+
+
 @pytest.fixture
 def client(db_session: Session) -> Iterator[TestClient]:
+    # Imported here rather than at module scope: create_app() runs the fail-closed
+    # secret check, and the settings it reads are written above this fixture.
+    from target_analyzer.main import app
+
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def user(db_session: Session) -> User:
+    return users.create(
+        db_session, username=USERNAME, name="Tester", password_hash=hash_password(PASSWORD)
+    )
+
+
+@pytest.fixture
+def auth_client(client: TestClient, user: User) -> TestClient:
+    """A client that logged in the way a browser does, so the session cookie is real."""
+    response = client.post(
+        "/login", data={"username": USERNAME, "password": PASSWORD}, follow_redirects=False
+    )
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+
+    return client
 
 
 @pytest.fixture
@@ -178,3 +228,31 @@ def make_payload(image_bytes: bytes, **overrides) -> ShipPayload:
     }
 
     return ShipPayload(**(fields | overrides))
+
+
+def post_ingest(client, auth, payload, png, *, jpeg=None):
+    """POST one session the way the Mac client does."""
+    files = {"normalized": ("n.png", png, "image/png")}
+
+    if jpeg is not None:
+        files["original"] = ("o.jpg", jpeg, "image/jpeg")
+
+    return client.post(
+        "/api/ingest", headers=auth, data={"payload": payload.model_dump_json()}, files=files
+    )
+
+
+@pytest.fixture
+def ingested(
+    client: TestClient, auth: dict[str, str], profile: TargetProfile, png_bytes: bytes
+) -> dict:
+    """One session in the database, put there through the real ingest path.
+
+    The dashboard tests read what a real flush leaves behind rather than hand-built
+    rows, so a change to how scoring is persisted fails them too.
+    """
+    response = post_ingest(client, auth, make_payload(make_jpeg()), png_bytes)
+
+    assert response.status_code == status.HTTP_201_CREATED
+
+    return response.json()

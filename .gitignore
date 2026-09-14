@@ -237,3 +237,7 @@ out/
 
 # Working notes for the coding assistant. Local to this checkout.
 CLAUDE.md
+
+# Tailwind standalone CLI, fetched on demand by `make css`. The built CSS is
+# committed; the binary is not.
+/tools/

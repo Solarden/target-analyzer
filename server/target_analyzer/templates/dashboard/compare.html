@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Compare readings — target-analyzer{% endblock %}
+{% block content %}
+  <h2>One photo, {{ overlays | length }} reading{{ "" if overlays | length == 1 else "s" }}</h2>
+  <p class="muted">
+    <a href="/dashboard/session/{{ session.id }}">{{ session.gun }} — {{ session.distance_m | m }} m</a>
+    {% if show_photo %}
+      · <a href="?photo=off">hide photo</a>
+    {% else %}
+      · <a href="?photo=on">show photo</a>
+    {% endif %}
+  </p>
+  {# Loops deliberately: a Phase-2 detector is one more interpretation row and shows
+     up as another column here with no change to this view. #}
+  <div class="compare">
+    {% for overlay, geom in overlays %}
+      <div class="panel">
+        <h3>
+          {{ overlay.interpretation.method }}
+          {% if overlay.interpretation.model %}<small>{{ overlay.interpretation.model }}</small>{% endif %}
+        </h3>
+        {{ ui.target_svg(overlay, geom, show_photo) }}
+        {{ ui.metrics_block(overlay.interpretation) }}
+      </div>
+    {% endfor %}
+  </div>
+{% endblock %}

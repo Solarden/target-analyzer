@@ -9,6 +9,9 @@ from typing import Annotated
 from fastapi import Depends
 from sqlmodel import Session
 
+from target_analyzer.auth import require_user
 from target_analyzer.db import get_session
+from target_analyzer.models import User
 
 DbSession = Annotated[Session, Depends(get_session)]
+CurrentUser = Annotated[User, Depends(require_user)]
