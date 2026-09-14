@@ -1,5 +1,5 @@
 """Registration: warping a photo of the target into the profile's canonical square.
-See internal_docs/implementation.md §1 (the frame contract) and §9.
+See implementation.md §1 (the frame contract) and §9.
 
 The fit is over-determined on purpose. Every detected marker contributes four corners,
 so a board of four markers gives sixteen correspondences, and the reprojection residual

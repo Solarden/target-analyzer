@@ -227,6 +227,34 @@ def test_a_future_schema_version_is_rejected(client, auth, profile, png_bytes):
     assert "schema_version" in response.json()["detail"]
 
 
+# Bare NaN survives pydantic's JSON parser, so it reaches the error detail as a float.
+NAN_PAYLOAD = (
+    '{"image_sha256":"' + "a" * 64 + '","canon_size_px":1000,"session":{"gun":"g",'
+    '"distance_m":25,"target_profile":"issf_precision","target_profile_version":1},'
+    '"hits":[{"x_canon":NaN,"y_canon":1}]}'
+)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param('{"nonsense": true}', id="missing-every-field"),
+        pytest.param(NAN_PAYLOAD, id="non-finite-coordinate"),
+    ],
+)
+def test_a_malformed_payload_is_422_not_500(client, auth, png_bytes, raw):
+    """A 500 would reach the Mac as "try again later" and requeue the payload forever."""
+    response = client.post(
+        "/api/ingest",
+        headers=auth,
+        data={"payload": raw},
+        files={"normalized": ("n.png", png_bytes, "image/png")},
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert all("input" not in error for error in response.json()["detail"])
+
+
 # --- upload hardening ------------------------------------------------------------
 
 

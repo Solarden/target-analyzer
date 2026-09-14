@@ -1,6 +1,6 @@
 """Target profile: ring geometry (server scoring) plus the ArUco marker board and
 manual-corner layout (client registration). One versioned JSON artifact per
-physical target, so scoring stays reproducible. See internal_docs/implementation.md §4.
+physical target, so scoring stays reproducible. See implementation.md §4.
 """
 
 import json

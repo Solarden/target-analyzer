@@ -18,6 +18,7 @@ import hashlib
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from pydantic import ValidationError
 from sqlmodel import Session, select
 
 from ta_shared.payload import ShipPayload
@@ -178,7 +179,15 @@ async def ingest(
     normalized: Annotated[UploadFile, File()],
     original: Annotated[UploadFile | None, File()] = None,
 ) -> dict:
-    ship = ShipPayload.model_validate_json(payload)
+    # FastAPI only handles its own RequestValidationError, so this raw parse would escape as
+    # a 500 — and include_input is off because a NaN value would make the 422 body one too.
+    try:
+        ship = ShipPayload.model_validate_json(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=exc.errors(include_url=False, include_input=False),
+        ) from exc
 
     if ship.schema_version != SUPPORTED_SCHEMA_VERSION:
         raise _bad_request(

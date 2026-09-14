@@ -1,5 +1,5 @@
 """The one interactive surface: an OpenCV window for clicking points on an image.
-See internal_docs/implementation.md §9.
+See implementation.md §9.
 
 Every highgui call in the client lives here, and so does every macOS quirk that comes
 with it. Two callers — the four-corner registration fallback and the hit picker — get

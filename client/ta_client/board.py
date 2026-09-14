@@ -1,5 +1,5 @@
 """The marker board: resolving its ArUco dictionary, rendering it, and drawing the
-target it belongs to. See internal_docs/implementation.md §4 and §9.
+target it belongs to. See implementation.md §4 and §9.
 
 Two renderings, because they answer different questions. :func:`render_svg` is the
 sheet you print — SVG carries millimetres, so it comes off the printer at the exact
