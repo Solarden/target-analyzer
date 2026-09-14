@@ -1,5 +1,5 @@
 """Decoding a photo into pixels, metadata-free bytes, and its identity hash.
-See internal_docs/implementation.md §9 and §12.4.
+See implementation.md §9 and §12.4.
 
 The sha256 is taken of the *re-encoded* bytes, never the file on disk: that is what
 makes it safe to use as the wire identity, because no GPS or camera EXIF survives into

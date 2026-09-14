@@ -1,5 +1,5 @@
 """Assembling the payload and writing the folder that carries it.
-See internal_docs/implementation.md §3 and §9.
+See implementation.md §3 and §9.
 
 Nothing here measures or computes anything — it puts what the other modules produced
 into the shape the server validates.

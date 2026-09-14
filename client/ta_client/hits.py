@@ -1,4 +1,4 @@
-"""Marking the holes. See internal_docs/implementation.md §9 and §13.
+"""Marking the holes. See implementation.md §9 and §13.
 
 Clicks land on the normalized image, so they already *are* canonical pixels — nothing
 here converts coordinates. This is also the seam Phase 2 replaces: a detector is a

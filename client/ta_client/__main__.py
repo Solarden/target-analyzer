@@ -1,5 +1,5 @@
 """One photo, end to end: ``python -m ta_client <photo> --gun … --distance …``.
-See internal_docs/implementation.md §9.
+See implementation.md §9.
 
 Load, register, mark the holes, package, ship. A session the server cannot take stays
 in the outbox and goes out on the next run.

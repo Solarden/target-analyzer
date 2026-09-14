@@ -1,7 +1,7 @@
 """The wire contract shared by the Mac client and the Pi server.
 
 Keeping these in one importable package means the two sides can never drift on
-the shape of what crosses the network. See internal_docs/implementation.md §3.
+the shape of what crosses the network. See implementation.md §3.
 """
 
 from datetime import UTC, date, datetime

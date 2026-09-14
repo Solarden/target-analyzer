@@ -10,8 +10,6 @@ and a custom YOLO on identical data.
 > API — `POST /api/ingest` behind a machine bearer token, idempotent on the image's
 > sha256 — and the Mac client end to end, from photo to a shipped session, with an
 > offline outbox behind it. Not yet: the dashboard. The build proceeds phase by phase.
-> Design and roadmap notes live in the maintainer's private docs (symlinked locally
-> at `internal_docs/`, not part of this public repo).
 
 ## Architecture
 

@@ -1,7 +1,7 @@
 """SQLModel table definitions — the whole MVP schema.
 
 Importing this module registers every table on SQLModel.metadata, which is what
-Alembic autogenerate reads. See internal_docs/implementation.md §5. Decisions
+Alembic autogenerate reads. See implementation.md §5. Decisions
 baked in here:
 
 - **Image and interpretation are decoupled.** One image carries many

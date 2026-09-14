@@ -1,6 +1,6 @@
 """Scoring and metrics — pure functions of (hits, profile). No DB, no FastAPI.
 
-See internal_docs/implementation.md §1 (the canonical-frame contract) and §6.
+See implementation.md §1 (the canonical-frame contract) and §6.
 
 The client never scores: it warps a photo into the profile's canonical square and
 sends hit coordinates in that frame. Everything here turns those coordinates into

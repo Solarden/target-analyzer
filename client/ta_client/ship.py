@@ -1,4 +1,4 @@
-"""The outbox and the sender that drains it. See internal_docs/implementation.md §9.
+"""The outbox and the sender that drains it. See implementation.md §9.
 
 Flush-first: every run drains the whole outbox, so a reconnect self-heals. The session
 just clicked is not a special case — it is written into the outbox like any other and is

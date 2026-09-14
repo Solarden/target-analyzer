@@ -1,4 +1,4 @@
-"""Client settings. See internal_docs/implementation.md §9 and §12.1.
+"""Client settings. See implementation.md §9 and §12.1.
 
 Read from the user's home, never from the checkout: this repo is public, so the bearer
 token has nowhere to live in it and a default pointing at a real server would be a
