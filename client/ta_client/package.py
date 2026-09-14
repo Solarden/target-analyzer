@@ -36,9 +36,9 @@ def build_payload(
 
 
 def write_session_dir(
-    dest: Path, payload: ShipPayload, normalized_png: bytes, original_jpg: bytes
+    dest: Path, payload: ShipPayload, normalized_png: bytes, original_jpg: bytes | None
 ) -> None:
-    """Write the three files of one session, appearing at ``dest`` all at once.
+    """Write one session's files, appearing at ``dest`` all at once.
 
     Staged in a sibling directory and moved into place, so an interrupted run leaves
     either nothing or a complete folder — never half of one for the outbox to flush.
@@ -52,7 +52,12 @@ def write_session_dir(
     try:
         (staging / "payload.json").write_text(payload.model_dump_json(), encoding="utf-8")
         (staging / "normalized.png").write_bytes(normalized_png)
-        (staging / "original.jpg").write_bytes(original_jpg)
+
+        # TA_SHIP_ORIGINAL's call, made here so that the file's presence is the whole gate
+        # and the sender reads no setting.
+        if original_jpg is not None:
+            (staging / "original.jpg").write_bytes(original_jpg)
+
         os.replace(staging, dest)
     finally:
         shutil.rmtree(staging, ignore_errors=True)

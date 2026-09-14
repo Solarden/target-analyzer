@@ -11,21 +11,30 @@ is the property the whole product rests on.
 """
 
 import hashlib
+import os
 import re
 import tempfile
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
+import httpx2
 import numpy as np
 
+from ta_client import ship
 from ta_client.board import render_markers, render_svg
+from ta_client.config import Settings
 from ta_client.load import load_stripped
 from ta_client.package import build_payload
 from ta_client.pick import _loupe, _Picking
 from ta_client.register import Registration, TooFewMarkers, refine_to_rings, register, warp
 from ta_shared.payload import Hit, SessionMeta, ShipPayload
 from ta_shared.profile import TargetProfile, load_profile
+
+# Stands in for the machine token wherever a Settings is built here. Not a credential:
+# nothing in this file reaches a network, so no server ever sees it.
+FAKE_TOKEN = "tok"  # nosec B105
 
 PROFILES = Path(__file__).resolve().parents[2] / "profiles"
 PROFILE_JSON = PROFILES / "issf_precision.json"
@@ -69,6 +78,25 @@ def _hide_markers(
         cv2.fillConvexPoly(out, in_photo.reshape(-1, 2).astype(np.int32), (255, 255, 255))
 
     return out
+
+
+def _queue(outbox: Path, *names: str) -> None:
+    """Put folders in the outbox without going through enqueue, which names them itself."""
+    for name in names:
+        folder = outbox / name
+        folder.mkdir(parents=True)
+        (folder / "payload.json").write_text("{}", encoding="utf-8")
+        (folder / "normalized.png").write_bytes(b"png")
+
+
+def _settings(**overrides) -> Settings:
+    """Settings from these values and the class defaults — never a personal config."""
+    return Settings(_env_file=None, **overrides)
+
+
+def _reply(status_code: int) -> SimpleNamespace:
+    """The two attributes flush reads off a response."""
+    return SimpleNamespace(status_code=status_code, text="detail")
 
 
 def _jpeg_with_exif() -> bytes:
@@ -242,8 +270,117 @@ def selfcheck() -> None:
     assert svg.count("<circle") == profile.n_rings
     assert svg.count("<g transform") == len(profile.board.markers) + 1  # +1 for the margin shift
 
+    # --- the outbox drains in order, exactly once, and survives the server going away ---
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        # A first run: the outbox is created by the first enqueue, not before it.
+        assert ship.pending(root / "never-created") == []
+
+        order = root / "order"
+        # Hand-named rather than enqueued, which would stamp three near-identical epochs.
+        _queue(order, "2-aaaaaaaaaaaa", "10-bbbbbbbbbbbb", "1-cccccccccccc")
+        # The two things that share the directory without being sessions.
+        (order / ".10-bbbbbbbbbbbb-x9k2").mkdir()
+        (order / "failed").mkdir()
+        oldest_first = ["1-cccccccccccc", "2-aaaaaaaaaaaa", "10-bbbbbbbbbbbb"]
+        assert [p.name for p in ship.pending(order)] == oldest_first, ship.pending(order)
+
+        settings = _settings(server_url="https://example.invalid/", ingest_token=FAKE_TOKEN)
+        sent: list[str] = []
+        replies = iter((201, 201, 409))
+
+        def accepting(_client, folder: Path, _settings) -> SimpleNamespace:
+            sent.append(folder.name)
+
+            return _reply(next(replies))
+
+        assert ship.flush(order, settings=settings, send=accepting) == 0
+        assert sent == oldest_first, sent
+        # The third reply was a 409.
+        assert ship.pending(order) == [], ship.pending(order)
+
+        offline = root / "offline"
+        _queue(offline, "20-dddddddddddd", "21-eeeeeeeeeeee", "22-ffffffffffff")
+        tried: list[str] = []
+
+        def drops(_client, folder: Path, _settings) -> SimpleNamespace:
+            tried.append(folder.name)
+
+            if len(tried) == 2:
+                raise httpx2.ConnectError("server went away")
+
+            return _reply(201)
+
+        assert ship.flush(offline, settings=settings, send=drops) == 2
+        assert tried == ["20-dddddddddddd", "21-eeeeeeeeeeee"], tried
+        # The one that failed is kept and the one behind it was never attempted, so the
+        # next run resends in the same order rather than skipping a session.
+        assert [p.name for p in ship.pending(offline)] == ["21-eeeeeeeeeeee", "22-ffffffffffff"]
+
+        # A 500 says the server is broken, not this folder — the same answer as a dropped
+        # connection, and the one an unhandled exception in ingest actually produces.
+        assert ship.flush(offline, settings=settings, send=lambda *_: _reply(500)) == 2
+        assert [p.name for p in ship.pending(offline)] == ["21-eeeeeeeeeeee", "22-ffffffffffff"]
+
+        refused = root / "refused"
+        _queue(refused, "40-111111111111")
+
+        # Both stop shipping, but for different reasons, and the message is the whole point:
+        # a redirect means the URL's scheme is wrong, never that the folder should be binned.
+        for code, hint in ((401, "delete that folder"), (301, "TA_SERVER_URL")):
+            try:
+                ship.flush(refused, settings=settings, send=lambda *_, c=code: _reply(c))
+                raise AssertionError(f"{code} must stop shipping, not clear the folder")
+            except ship.ShipError as exc:
+                assert hint in str(exc), (code, str(exc))
+
+            assert [p.name for p in ship.pending(refused)] == ["40-111111111111"], code
+
+        # Two markings of one photo, and an unrelated third.
+        deduped = root / "deduped"
+        _queue(deduped, "30-abcdefabcdef", "31-abcdefabcdef", "32-0123456789ab")
+        assert [p.name for p in ship.pending(deduped)] == ["31-abcdefabcdef", "32-0123456789ab"]
+        assert not (deduped / "30-abcdefabcdef").exists()
+
+        without = ship.enqueue(root / "without", payload, b"png", None)
+        assert not (without / "original.jpg").exists()
+        assert ship.pending(root / "without") == [without]
+        assert without.name.endswith(f"-{payload.image_sha256[:12]}"), without.name
+        complete = ship.enqueue(root / "with", payload, b"png", b"jpg")
+        assert (complete / "original.jpg").is_file()
+
+        # --- the request the sender builds, without a server to send it to ---
+        request = ship.build_request(complete, settings)
+        # A multipart request streams, so the body only exists once it is read.
+        body = request.read()
+        assert request.url.path == "/api/ingest"
+        assert request.headers["authorization"] == f"Bearer {FAKE_TOKEN}"
+        assert b'name="payload"' in body
+        assert b'name="payload"; filename=' not in body, "payload must not be a file part"
+        assert b'name="normalized"; filename="normalized.png"' in body
+        assert b'name="original"; filename="original.jpg"' in body
+        assert b'name="original"' not in ship.build_request(without, settings).read()
+
+        # None of these can ship, and without this guard each would only say so after a
+        # whole session has been clicked.
+        for url, token in (
+            ("localhost:8000", FAKE_TOKEN),
+            ("http://", FAKE_TOKEN),
+            ("https://ok.invalid", ""),
+        ):
+            try:
+                ship.check_config(_settings(server_url=url, ingest_token=token))
+                raise AssertionError(f"{url!r}/{token!r} must be refused up front")
+            except ship.ShipError:
+                pass
+
     print("client self-check OK")
 
 
 if __name__ == "__main__":
+    # Stripped here rather than inside selfcheck(), which is importable: a caller may be
+    # relying on the TA_* vars this would otherwise delete out from under it.
+    for key in [k for k in os.environ if k.startswith("TA_")]:
+        del os.environ[key]
+
     selfcheck()

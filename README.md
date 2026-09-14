@@ -8,8 +8,8 @@ and a custom YOLO on identical data.
 > **Status: early.** In place so far: the shared wire contract, the full database
 > schema, the scoring/metrics core (rings, group size, precision, bias), the ingest
 > API — `POST /api/ingest` behind a machine bearer token, idempotent on the image's
-> sha256 — and the Mac client up to packaging a session. Not yet: shipping that
-> session over the network, and the dashboard. The build proceeds phase by phase.
+> sha256 — and the Mac client end to end, from photo to a shipped session, with an
+> offline outbox behind it. Not yet: the dashboard. The build proceeds phase by phase.
 > Design and roadmap notes live in the maintainer's private docs (symlinked locally
 > at `internal_docs/`, not part of this public repo).
 
@@ -73,15 +73,30 @@ the physical target bumps the version rather than editing the old row.
 uv run python -m ta_client.board profiles/issf_precision.json --out board.svg
 uv run python -m ta_client.selfcheck
 uv run python -m ta_client photo.jpg --gun "CZ 75" --distance 25 --profile profiles/issf_precision.json
+uv run python -m ta_client.ship          # drain the outbox without processing a photo
 ```
+
+The client reads its settings from `~/.config/target-analyzer/env` — never from the
+checkout, which is public:
+
+```
+TA_SERVER_URL=https://target.example.com
+TA_INGEST_TOKEN=the-token-create_token-printed
+TA_SHIP_ORIGINAL=true
+```
+
+`chmod 600` that file: it holds the bearer token. With `TA_SERVER_URL` unset the client
+still processes photos and leaves them queued.
 
 Print `board.svg` at 100% — it is in millimetres, and the calibration line on it must
 measure 50 mm with a ruler, or the rings on paper will not match the profile the server
 scores against. Photograph the target so the whole sheet is in frame, then run the
 pipeline: it warps the photo into the canonical frame, asks you to confirm the rings
-landed on the printed ones, and lets you click the holes. The result is a session
-folder under `out/` (gitignored — it holds real photos) — sending it to the server is
-the next phase.
+landed on the printed ones, and lets you click the holes. The session then goes to the
+server; if the server is unreachable it stays in the outbox
+(`~/.target-analyzer/outbox/`, overridable with `--outbox`) and the next run sends it,
+oldest first. Ingest is idempotent on the photo's sha256, so a replayed flush never
+creates a second session.
 
 `--profile` has no default on purpose: it is the geometry every hit is scored against,
 and the wrong one produces a complete, plausible session in which every shot is in the

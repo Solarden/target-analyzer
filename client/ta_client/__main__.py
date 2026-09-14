@@ -1,27 +1,26 @@
 """One photo, end to end: ``python -m ta_client <photo> --gun … --distance …``.
 See internal_docs/implementation.md §9.
 
-Load, register, mark the holes, package. The result is a session folder on disk; the
-shipping half of the pipeline reads it from there.
+Load, register, mark the holes, package, ship. A session the server cannot take stays
+in the outbox and goes out on the next run.
 """
 
 import argparse
 import sys
-import time
 from datetime import date
 from pathlib import Path
 
 import cv2
 from pydantic import ValidationError
 
+from ta_client import ship
+from ta_client.config import get_settings
 from ta_client.hits import pick_hits
 from ta_client.load import load_stripped
-from ta_client.package import build_payload, write_session_dir
+from ta_client.package import build_payload
 from ta_client.register import register_interactive
 from ta_shared.payload import SessionMeta
 from ta_shared.profile import load_profile
-
-DEFAULT_OUT = Path("out")
 
 
 def main(argv: list[str]) -> int:
@@ -42,14 +41,16 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--profile", type=Path, required=True, help="path to the target profile JSON"
     )
+    # Not --out: ta_client.board already spends that name on an output SVG file.
     parser.add_argument(
-        "--out", type=Path, default=DEFAULT_OUT, metavar="DIR", help="where the session folder goes"
+        "--outbox", type=Path, default=None, metavar="DIR", help="the outbox to write into"
     )
     args = parser.parse_args(argv)
 
     if not args.profile.is_file():
         parser.error(f"no profile at {args.profile} — run from the repo root, or pass --profile")
 
+    settings = get_settings()
     profile = load_profile(args.profile)
 
     # Built before anything interactive: a bad --distance or an over-long --gun is a
@@ -67,6 +68,14 @@ def main(argv: list[str]) -> int:
         # Field names, not flag names: --distance carries distance_m, and inventing a flag
         # that does not exist would be worse than making the reader map one to the other.
         parser.error("; ".join(f"{e['loc'][0]}: {e['msg']}" for e in exc.errors()))
+
+    # Also before anything interactive: a missing token is a config error, and discovering
+    # it after forty holes have been clicked is the same wasted work as a bad --distance.
+    if settings.server_url:
+        try:
+            ship.check_config(settings)
+        except ship.ShipError as exc:
+            parser.error(str(exc))
 
     photo, original_jpg, digest = load_stripped(args.photo)
     registration = register_interactive(photo, profile)
@@ -95,12 +104,24 @@ def main(argv: list[str]) -> int:
     if not ok:
         raise ValueError("could not encode the normalized image")
 
-    # Epoch-prefixed and hash-tagged: the outbox orders folders by name and recognises a
-    # session it already holds by the hash.
-    destination = args.out / f"{int(time.time())}-{digest[:12]}"
-    write_session_dir(destination, payload, buffer.tobytes(), original_jpg)
+    outbox = args.outbox or settings.outbox_path
+    destination = ship.enqueue(
+        outbox, payload, buffer.tobytes(), original_jpg if settings.ship_original else None
+    )
     print(f"{len(hits)} hits · {registration.summary(profile)}")
     print(f"{digest[:12]} -> {destination}")
+
+    if not settings.server_url:
+        print("TA_SERVER_URL is not set — the session stays queued", file=sys.stderr)
+
+        return 0
+
+    try:
+        ship.flush(outbox, settings=settings)
+    except ship.ShipError as exc:
+        print(exc, file=sys.stderr)
+
+        return 1
 
     return 0
 
