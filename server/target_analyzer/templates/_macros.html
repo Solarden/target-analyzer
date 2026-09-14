@@ -1,0 +1,67 @@
+{# The target overlay and the metric block, shared by the Session and Compare views. #}
+{% macro target_svg(overlay, geom, show_photo) %}
+  <svg class="target"
+       viewBox="0 0 {{ geom.canon }} {{ geom.canon }}"
+       role="img"
+       aria-label="{{ overlay.holes | length }} holes on {{ overlay.profile.name }} v{{ overlay.profile.version }}">
+    {% if show_photo %}
+      {# The render is the canonical square by construction, so it maps 1:1 onto the
+         viewBox with no aspect-ratio fitting. #}
+      <image href="/dashboard/image/{{ overlay.image.id }}"
+             x="0"
+             y="0"
+             width="{{ geom.canon }}"
+             height="{{ geom.canon }}"
+             opacity="0.7" />
+    {% endif %}
+    {# ring_radii_px ascends centre-outward, so reversed it runs outermost-first:
+       the paint order that keeps the inner rings on top. #}
+    {% for radius in overlay.profile.ring_radii_px | reverse %}
+      <circle class="ring" cx="{{ geom.centre_x }}" cy="{{ geom.centre_y }}" r="{{ radius }}" fill="none" stroke-width="{{ geom.stroke }}" />
+    {% endfor %}
+    {% for hole in overlay.holes %}
+      <circle class="{{ hole.ring | ring_class(overlay.profile.n_rings) }}" cx="{{ hole.x_canon }}" cy="{{ hole.y_canon }}" r="{{ geom.hole_radius }}">
+      <title>ring {{ hole.ring if hole.ring else "miss" }}</title>
+      </circle>
+    {% endfor %}
+    {% set metrics = overlay.interpretation.metrics %}
+    {% if metrics.centroid %}
+      {# From the frame centre to the group centre, so this line IS the bias vector.
+         SVG is y-down and so is the canonical frame — nothing is flipped. #}
+      <line class="bias" x1="{{ geom.centre_x }}" y1="{{ geom.centre_y }}" x2="{{ metrics.centroid[0] }}" y2="{{ metrics.centroid[1] }}" stroke-width="{{ geom.stroke * 2 }}" />
+      <circle class="centroid" cx="{{ metrics.centroid[0] }}" cy="{{ metrics.centroid[1] }}" r="{{ geom.hole_radius }}" fill="none" stroke-width="{{ geom.stroke * 2 }}" />
+    {% endif %}
+  </svg>
+{% endmacro %}
+{% macro metrics_block(interpretation) %}
+  <dl class="metrics">
+    <dt>Holes</dt>
+    <dd>
+      {{ interpretation.n_holes }}
+    </dd>
+    <dt>Total</dt>
+    <dd>
+      {{ interpretation.total_score }}
+    </dd>
+    <dt>Average</dt>
+    <dd>
+      {{ interpretation.avg_score | num(2) }}
+    </dd>
+    <dt>Best</dt>
+    <dd>
+      {{ interpretation.best_score | num(0) }}
+    </dd>
+    <dt>Mean radius</dt>
+    <dd>
+      {{ interpretation.mean_radius_mm | mm }}
+    </dd>
+    <dt>Extreme spread</dt>
+    <dd>
+      {{ interpretation.extreme_spread_mm | mm }}
+    </dd>
+    <dt>Bias</dt>
+    <dd>
+      {{ interpretation.bias_mm | mm }} {{ interpretation.metrics.bias_direction or "" }}
+    </dd>
+  </dl>
+{% endmacro %}

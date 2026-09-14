@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}{{ session.gun }} at {{ session.distance_m | m }} m — target-analyzer{% endblock %}
+{% block content %}
+  <h2>{{ session.gun }} — {{ session.distance_m | m }} m</h2>
+  <p class="muted">
+    Shot {{ (session.shot_at or session.created_at) | day }}
+    {% if show_photo %}
+      · <a href="?photo=off">hide photo</a>
+    {% else %}
+      · <a href="?photo=on">show photo</a>
+    {% endif %}
+  </p>
+  {% for overlay, geom in overlays %}
+    <div class="panel">
+      {{ ui.target_svg(overlay, geom, show_photo) }}
+      {{ ui.metrics_block(overlay.interpretation) }}
+      <p class="muted">
+        Read as <code>{{ overlay.interpretation.method }}</code> against
+        {{ overlay.profile.name }} v{{ overlay.profile.version }} ·
+        <a href="/dashboard/compare/{{ overlay.image.id }}">compare readings</a>
+      </p>
+    </div>
+  {% else %}
+    <p class="muted">This session has no scored photo.</p>
+  {% endfor %}
+  <form id="notes"
+        class="panel"
+        method="post"
+        action="/dashboard/session/{{ session.id }}/notes">
+    <label for="notes-text">Notes</label>
+    <textarea id="notes-text" name="notes" rows="4" maxlength="10000">{{ session.notes }}</textarea>
+    <p>
+      <button type="submit">Save notes</button>
+    </p>
+  </form>
+{% endblock %}

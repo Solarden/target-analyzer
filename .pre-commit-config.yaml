@@ -1,7 +1,6 @@
 # Run `uv run pre-commit install` once to enable. See README.
-# djlint (Jinja templates) and hadolint (Dockerfile) are deliberately omitted until
-# their targets exist — added alongside the code they guard: the dashboard (P5) and
-# the Docker image (P6).
+# hadolint (Dockerfile) is deliberately omitted until its target exists — it arrives
+# alongside the Docker image in P6.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -25,6 +24,15 @@ repos:
       - id: ruff
         args: [--fix, --show-fixes, --exit-non-zero-on-fix]
       - id: ruff-format
+
+  # Keep rev in step with the djlint floor in pyproject.toml: two versions of a
+  # formatter reformat the same file differently and undo each other forever.
+  - repo: https://github.com/djlint/djLint
+    rev: v1.46.1
+    hooks:
+      # Not djlint-reformat-jinja: that one is types_or:[jinja], which identify gives to
+      # .jinja/.j2 — these templates are .html. The profile comes from pyproject.toml.
+      - id: djlint-reformat
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.8.6
