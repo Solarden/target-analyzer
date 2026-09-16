@@ -35,7 +35,7 @@ services:
     # one thing that should talk to the app directly.
     command: >
       sh -c "alembic upgrade head &&
-             uvicorn target_analyzer.main:app --host 0.0.0.0 --port 8000"
+             uvicorn target_analyzer.main:app --host 0.0.0.0 --port 8000 --no-server-header"
     healthcheck:
       # /health turns 200 only after migrations ran and the server is up, so a healthy
       # app is the signal that the database is both migrated and reachable.

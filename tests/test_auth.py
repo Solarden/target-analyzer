@@ -19,7 +19,7 @@ from target_analyzer import api
 from target_analyzer import auth as auth_module
 from target_analyzer.auth import hash_password, login_session, verify_password
 from target_analyzer.config import INSECURE_DEFAULT_SECRET, Settings, get_settings
-from target_analyzer.main import create_app
+from target_analyzer.main import SECURITY_HEADERS, create_app
 from target_analyzer.models import User
 from target_analyzer.queries import users
 
@@ -161,6 +161,16 @@ def test_the_session_cookie_is_signed_with_the_configured_secret(auth_client):
     signer = itsdangerous.TimestampSigner(get_settings().secret_key.get_secret_value())
 
     assert signer.unsign(auth_client.cookies["session"], max_age=60)
+
+
+@pytest.mark.parametrize("path", ["/login", "/dashboard"])
+def test_every_response_carries_the_security_headers(client, path):
+    """The proxy in front is not guaranteed to be the one this repo ships, and a redirect
+    away from a guarded page is a response like any other.
+    """
+    response = client.get(path, follow_redirects=False)
+
+    assert {name: response.headers.get(name) for name in SECURITY_HEADERS} == SECURITY_HEADERS
 
 
 @pytest.mark.parametrize("secure", [True, False])

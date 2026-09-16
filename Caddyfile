@@ -15,19 +15,7 @@
 	@offlan not remote_ip 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 127.0.0.1/8
 	respond @offlan "Forbidden" 403
 
-	header {
-		# Same-origin HTML forms throughout, so framing is never legitimate — and
-		# SameSite=Lax does not help inside a frame, where a POST is same-site.
-		X-Frame-Options DENY
-		# 'unsafe-inline' is for the two onchange="this.form.submit()" handlers on the
-		# Trend filters, nothing else; the chart's data block never executes.
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-		X-Content-Type-Options nosniff
-		Referrer-Policy same-origin
-		# Caddy does not send HSTS on its own.
-		Strict-Transport-Security "max-age=31536000"
-		-Server
-	}
-
+	# No header block: the app sets CSP, HSTS, frame-ancestors and nosniff itself, so they
+	# hold behind any proxy rather than only this one.
 	reverse_proxy app:8000
 }
