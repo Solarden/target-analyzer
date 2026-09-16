@@ -1,0 +1,23 @@
+# The Dockerfile copies named paths and never `COPY . .` — keep it that way. A working
+# tree can hold gitignored local files that have no business reaching an image.
+.git
+.gitignore
+.github
+.idea
+.claude
+.venv
+**/__pycache__
+**/*.pyc
+.ruff_cache
+.pytest_cache
+.mypy_cache
+data
+# Real range photos, the warped copy and the payload — session data, never in an image.
+out
+tools
+tests
+*.db
+*.db-wal
+*.db-shm
+.env
+CLAUDE.md

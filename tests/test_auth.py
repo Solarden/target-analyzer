@@ -12,12 +12,13 @@ import pytest
 from fastapi import status
 from pydantic import SecretStr
 from sqlmodel import Session
+from starlette.middleware.sessions import SessionMiddleware
 from tests.conftest import PASSWORD, USERNAME
 
 from target_analyzer import api
 from target_analyzer import auth as auth_module
 from target_analyzer.auth import hash_password, login_session, verify_password
-from target_analyzer.config import INSECURE_DEFAULT_SECRET, get_settings
+from target_analyzer.config import INSECURE_DEFAULT_SECRET, Settings, get_settings
 from target_analyzer.main import create_app
 from target_analyzer.models import User
 from target_analyzer.queries import users
@@ -160,6 +161,22 @@ def test_the_session_cookie_is_signed_with_the_configured_secret(auth_client):
     signer = itsdangerous.TimestampSigner(get_settings().secret_key.get_secret_value())
 
     assert signer.unsign(auth_client.cookies["session"], max_age=60)
+
+
+@pytest.mark.parametrize("secure", [True, False])
+def test_the_secure_cookie_setting_reaches_the_session_middleware(monkeypatch, secure):
+    """The setting is only worth a default if it arrives where the flag is actually set."""
+    monkeypatch.setattr(get_settings(), "secure_cookies", secure)
+    session = next(m for m in create_app().user_middleware if m.cls is SessionMiddleware)
+
+    assert session.kwargs["https_only"] is secure
+
+
+def test_the_secure_cookie_flag_defaults_on(monkeypatch):
+    """The conftest turns this off, so no other test can notice the default being flipped back."""
+    monkeypatch.delenv("TA_SECURE_COOKIES", raising=False)
+
+    assert Settings(_env_file=None).secure_cookies is True
 
 
 @pytest.mark.parametrize(("debug", "refused"), [(False, True), (True, False)])

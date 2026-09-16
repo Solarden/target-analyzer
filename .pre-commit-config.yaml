@@ -1,6 +1,4 @@
 # Run `uv run pre-commit install` once to enable. See README.
-# hadolint (Dockerfile) is deliberately omitted until its target exists — it arrives
-# alongside the Docker image in P6.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -50,6 +48,12 @@ repos:
     rev: v8.30.0
     hooks:
       - id: gitleaks
+
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.14.0
+    hooks:
+      # Runs hadolint in a container, so no local binary is needed.
+      - id: hadolint-docker
 
   - repo: local
     hooks:
