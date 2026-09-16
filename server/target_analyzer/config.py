@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     debug: bool = False
     database_url: str = "sqlite:///./target_analyzer.db"
     secret_key: SecretStr = SecretStr(INSECURE_DEFAULT_SECRET)
-    secure_cookies: bool = False
+    # Strict by default: forgetting it in production leaks the session cookie silently,
+    # forgetting it in plain-http dev only stops the login sticking.
+    secure_cookies: bool = True
     # Offered to every dashboard visitor in the footer: the AGPL asks a network-served
     # app to point its users at the source it is actually running.
     source_url: str = "https://github.com/Solarden/target-analyzer"

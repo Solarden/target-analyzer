@@ -10,8 +10,9 @@ and a custom YOLO on identical data.
 > API — `POST /api/ingest` behind a machine bearer token, idempotent on the image's
 > sha256 — the Mac client end to end, from photo to a shipped session, with an offline
 > outbox behind it, and the dashboard behind a login: score and precision over time,
-> the target rendered with its holes, and one photo's readings side by side. Not yet:
-> deployment, and anything that reads the holes for you. The build proceeds phase by phase.
+> the target rendered with its holes, and one photo's readings side by side, and a
+> container image with a compose stack that serves it behind TLS. Not yet: anything that
+> reads the holes for you. The build proceeds phase by phase.
 
 ## Architecture
 
@@ -23,7 +24,7 @@ Two pieces:
   An offline outbox queues submissions when the server is unreachable.
 - **Raspberry Pi — the server.** A FastAPI app that turns coordinates
   into ring scores + metrics from the (versioned) target profile, persists to
-  Postgres, and serves an HTMX dashboard behind a login.
+  Postgres, and serves a server-rendered dashboard behind a login.
 
 The Mac never scores — it sends coordinates and the server owns the scoring
 geometry, so re-measuring a target re-scores every past session consistently.
@@ -52,7 +53,9 @@ uv run pytest
   The DB-backed tests run against a throwaway Postgres for dialect parity — set
   `TA_TEST_DATABASE_URL` to a SQLite URL for a docker-less run.
 - Config is environment-driven (`TA_*`). Copy `.env.example` to `.env` for local
-  overrides — real secrets never live in the repo.
+  overrides — real secrets never live in the repo. Plain-http dev also wants
+  `TA_SECURE_COOKIES=false`, or the browser drops the session cookie and every page
+  bounces back to the login.
 
 ### Running the server
 
@@ -63,6 +66,10 @@ uv run python -m target_analyzer.create_token   # token -> the Mac, hash -> TA_I
 uv run python -m target_analyzer.create_user --username alice --name "Alice"
 uv run uvicorn target_analyzer.main:app --reload
 ```
+
+Over plain http, set `TA_SECURE_COOKIES=false` first. The session cookie is marked Secure
+by default, and the browser drops a Secure cookie on an http origin — so a correct login
+lands straight back on the login page with nothing to say why.
 
 A target profile must be seeded before anything can be ingested: it is the geometry
 the server scores against, and profiles are immutable and versioned, so re-measuring
@@ -122,6 +129,52 @@ and the wrong one produces a complete, plausible session in which every shot is 
 wrong ring.
 
 macOS only: HEIC photos are converted with `sips` on the way in.
+
+## Deployment
+
+`docker compose up -d` builds the image, applies the migrations on start and serves the
+dashboard over HTTPS. It does **not** run a database: point it at an existing PostgreSQL
+server, and create the role and the database there first, as its superuser.
+
+```
+CREATE ROLE target_analyzer LOGIN PASSWORD '...';
+CREATE DATABASE target_analyzer OWNER target_analyzer;
+```
+
+Copy `.env.example` to `.env` beside the compose file and fill in `TA_DATABASE_URL`,
+`TA_SECRET_KEY` and `TA_SITE_ADDRESS`. A host that already runs a reverse proxy starts
+the app on its own instead, and points that proxy at port 8000:
+
+```
+docker compose up -d app
+```
+
+Then two one-time steps — the geometry the server scores against (the same profile you
+print the sheet from and pass to the client) and an account to log in with:
+
+```
+docker compose run --rm app python -m target_analyzer.seed_profile profiles/issf_pistol_50m.json
+docker compose run --rm app python -m target_analyzer.create_user --username alice --name "Alice"
+```
+
+`create_user` prompts for the password twice, so it needs a terminal — `docker compose
+run` gives it one, `exec` on the running container does not. Last, mint the client's
+bearer token: the hash goes in `.env`, the token itself in the Mac's
+`~/.config/target-analyzer/env`.
+
+```
+docker compose run --rm app python -m target_analyzer.create_token
+```
+
+Upgrading is `docker compose build app && docker compose up -d app`: the container runs
+`alembic upgrade head` before uvicorn, so migrations need no step of their own, and
+`/health` answers 200 only once they have applied and the database is reachable — which
+is also what the container's healthcheck asks.
+
+`tls internal` means Caddy signs its own certificate; browsers trust it once its root CA
+is installed on the devices you browse from. For a publicly trusted certificate without
+exposing the host, use an ACME DNS-01 challenge instead — that needs a Caddy image built
+with your DNS provider's plugin.
 
 ## License
 

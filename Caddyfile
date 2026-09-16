@@ -1,0 +1,21 @@
+# Reverse proxy in front of the FastAPI app. LAN-only by design: there is no public
+# registration and the app stores photographs, so the matcher below refuses anything
+# arriving from outside a private range, whatever else can reach the proxy.
+#
+# Set TA_SITE_ADDRESS to the name you browse the app at and make it resolve to this
+# host on your network (local DNS, or a hosts entry). `tls internal` then issues a
+# certificate from Caddy's own CA, trusted once that CA is installed on the devices you
+# browse from — `caddy trust`, or the root under the caddy_data volume. For a
+# browser-trusted certificate without exposing the host to the internet, swap this for
+# an ACME DNS-01 challenge: that needs a Caddy build carrying your provider's plugin.
+{$TA_SITE_ADDRESS:target.local} {
+	tls internal
+
+	# Private LAN ranges. Reaching the app over a VPN means adding that VPN's range.
+	@offlan not remote_ip 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 127.0.0.1/8
+	respond @offlan "Forbidden" 403
+
+	# No header block: the app sets CSP, HSTS, frame-ancestors and nosniff itself, so they
+	# hold behind any proxy rather than only this one.
+	reverse_proxy app:8000
+}

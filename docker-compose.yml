@@ -1,0 +1,79 @@
+# The app, plus a reverse proxy that terminates TLS in front of it. A host that already
+# runs a proxy starts the app alone (`docker compose up -d app`) and points its own at
+# port 8000; everyone else gets both.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    # A Python web server needs no Linux capabilities, and nothing here ever wants to
+    # gain privileges through a setuid binary.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # A variable reaches the container only by being named here: there is no env_file, so
+    # the .env beside this file is read for interpolation and nothing else.
+    environment:
+      # An existing PostgreSQL server, NOT a service of this compose — the README's
+      # Deployment section has the role and database to create on it first.
+      - TA_DATABASE_URL=${TA_DATABASE_URL:?set TA_DATABASE_URL in your environment or .env}
+      # Must be set — the app refuses to sign session cookies with the placeholder.
+      # Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+      - TA_SECRET_KEY=${TA_SECRET_KEY:?set TA_SECRET_KEY in your environment or .env}
+      # Pinned: the in-code default is relative, which inside the container resolves to
+      # /app/data — ephemeral, and for a shipped session the server holds the only copy.
+      - TA_DATA_PATH=/data
+      # Defaulted, not required: unset, only /api/ingest answers 503 and names the
+      # variable, where `:?` would stop the container being created at all.
+      - TA_INGEST_TOKEN_HASH=${TA_INGEST_TOKEN_HASH:-}
+      # Bare key: passed through when it is set, absent from the container when it is not,
+      # which leaves the app's own default the only definition of the limit.
+      - TA_ATTACHMENT_MAX_BYTES
+    volumes:
+      - ./data:/data
+    # Migrate, then serve. The port reaches the compose network only — the proxy is the
+    # one thing that should talk to the app directly.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn target_analyzer.main:app --host 0.0.0.0 --port 8000 --no-server-header"
+    healthcheck:
+      # /health turns 200 only after migrations ran and the server is up, so a healthy
+      # app is the signal that the database is both migrated and reachable.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  caddy:
+    # Stock image: the shipped Caddyfile issues its own certificate and needs no DNS
+    # plugin, so there is nothing to build.
+    image: caddy:2
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # The only capability it needs: binding :80/:443.
+      - NET_BIND_SERVICE
+    # No variable here may be required: compose interpolates before it filters profiles, so
+    # a `:?` would break a deployment that disables this service and uses its own proxy.
+    environment:
+      # The name you reach the app at; it must resolve to this host on your network.
+      - TA_SITE_ADDRESS=${TA_SITE_ADDRESS:-target.local}
+    ports:
+      # HTTPS. :80 only redirects to HTTPS — no application data crosses it.
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:
