@@ -16,17 +16,18 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 import httpx2
 
 from ta_client.config import ENV_FILE, Settings, get_settings
 from ta_client.package import write_session_dir
-from ta_shared.payload import ShipPayload
+from ta_shared.payload import GROUND_TRUTH_METHOD, ShipPayload
 
-# {epoch}-{sha256[:12]}, and the filter that keeps a half-written staging dotfile out of
-# the outbox — write_session_dir stages inside the outbox until os.replace renames it.
-NAME = re.compile(r"\d+-[0-9a-f]{12}")
+# {epoch}-{sha256[:12]}-{method}, and the filter that keeps a half-written staging dotfile
+# out of the outbox — write_session_dir stages inside it until os.replace renames it.
+NAME = re.compile(r"\d+-[0-9a-f]{12}(-[a-z0-9_]+)?")
 # 409 is a success here: the server already holds the photo, so the folder is finished.
 # is_success and raise_for_status() disagree, and would stall the outbox on every replay.
 DONE = (201, 409)
@@ -69,31 +70,63 @@ def enqueue(
     outbox: Path, payload: ShipPayload, normalized_png: bytes, original_jpg: bytes | None
 ) -> Path:
     """Write one session into the outbox and return its folder."""
-    # Epoch-prefixed so the outbox keeps the order the sessions were shot in, hash-tagged so
-    # a second marking of one photo is recognisably the same photo. pending() reads both.
-    folder = outbox / f"{int(time.time())}-{payload.image_sha256[:12]}"
+    # Epoch first so the outbox keeps the order the sessions were shot in, then the photo
+    # and the method, because a reading is superseded only by the same method's.
+    folder = outbox / f"{int(time.time())}-{payload.image_sha256[:12]}-{payload.method}"
     write_session_dir(folder, payload, normalized_png, original_jpg)
 
     return folder
 
 
+class _Parts(NamedTuple):
+    epoch: int
+    photo: str
+    method: str
+
+
+def _parts(folder: Path) -> _Parts:
+    """A session folder's name, read back.
+
+    A name without a method reads as the ground truth, so such a folder ships rather than
+    sitting in the outbox unnoticed.
+    """
+    epoch, photo, *method = folder.name.split("-", 2)
+
+    return _Parts(int(epoch), photo, method[0] if method else GROUND_TRUTH_METHOD)
+
+
+def _order(folder: Path) -> tuple[int, bool]:
+    """Oldest first, then the ground truth ahead of a detector sharing its second.
+
+    The epoch sorts as an integer: it is unpadded, so "10-" must not land before "2-".
+
+    One run enqueues both readings of a photo, and a detector's reading alone on the
+    server is a session scored by nobody.
+    """
+    parts = _parts(folder)
+
+    return parts.epoch, parts.method != GROUND_TRUTH_METHOD
+
+
 def pending(outbox: Path) -> list[Path]:
-    """The outbox, oldest first, with superseded markings of the same photo dropped."""
+    """The outbox, oldest first, with superseded markings dropped.
+
+    Superseded means the same photo read by the same method. Two methods of one photo are
+    two readings to compare, and dropping either would be a silent loss.
+    """
     if not outbox.is_dir():
         return []
 
     folders = sorted(
-        (p for p in outbox.iterdir() if p.is_dir() and NAME.fullmatch(p.name)),
-        # Integer, not lexical: the epoch is unpadded, so "10-" must not sort before "2-".
-        key=lambda p: int(p.name.split("-")[0]),
+        (p for p in outbox.iterdir() if p.is_dir() and NAME.fullmatch(p.name)), key=_order
     )
-    # The server keeps whichever marking of a photo reaches it first, so shipping the older
-    # of two would make the stale one permanent and 409 the correction that replaced it.
-    keep = set({p.name.split("-")[1]: p for p in folders}.values())
+    # The server keeps whichever marking reaches it first, so shipping the older of two
+    # would make the stale one permanent and 409 the correction that replaced it.
+    keep = set({(_parts(p).photo, _parts(p).method): p for p in folders}.values())
 
     for folder in folders:
         if folder not in keep:
-            print(f"{folder.name}: superseded by a later marking of the same photo")
+            print(f"{folder.name}: superseded by a later reading of the same photo")
             shutil.rmtree(folder)
 
     return [p for p in folders if p in keep]

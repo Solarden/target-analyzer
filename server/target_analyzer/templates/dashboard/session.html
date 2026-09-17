@@ -24,6 +24,7 @@
   {% else %}
     <p class="muted">This session has no scored photo.</p>
   {% endfor %}
+  {% if overlays %}{{ ui.legend() }}{% endif %}
   <form id="notes"
         class="panel"
         method="post"

@@ -23,7 +23,7 @@ from target_analyzer.config import INSECURE_DEFAULT_SECRET, get_settings
 # through that file — one behind its own proxy would otherwise get none of this.
 SECURITY_HEADERS = {
     # 'unsafe-inline' is for the two onchange="this.form.submit()" handlers on the Trend
-    # filters; no template carries a style attribute, so style-src needs no exception.
+    # filters.
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; "
         "img-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"

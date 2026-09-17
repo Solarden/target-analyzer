@@ -33,6 +33,25 @@
     {% endif %}
   </svg>
 {% endmacro %}
+{# One key for the page, not one per drawing. The swatches reuse the drawing's own classes,
+   so a colour cannot drift between the legend and the thing it explains; without it the
+   bias vector reads as a shot. #}
+{% macro legend() %}
+  <p class="legend">
+    <svg class="swatch" viewBox="0 0 10 10" aria-hidden="true">
+      <circle class="hole-good" cx="5" cy="5" r="4" />
+    </svg>
+    holes, coloured by ring ·
+    <svg class="swatch" viewBox="0 0 10 10" aria-hidden="true">
+      <circle class="centroid" cx="5" cy="5" r="3.5" fill="none" stroke-width="1.5" />
+    </svg>
+    group centre ·
+    <svg class="swatch" viewBox="0 0 10 10" aria-hidden="true">
+      <line class="bias" x1="0" y1="5" x2="10" y2="5" stroke-width="2" />
+    </svg>
+    bias, point of aim to group centre
+  </p>
+{% endmacro %}
 {% macro metrics_block(interpretation) %}
   <dl class="metrics">
     <dt>Holes</dt>

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ta_client import __version__
 from ta_client.register import Registration
-from ta_shared.payload import Hit, SessionMeta, ShipPayload
+from ta_shared.payload import Hit, Method, SessionMeta, ShipPayload
 from ta_shared.profile import TargetProfile
 
 
@@ -23,12 +23,14 @@ def build_payload(
     registration: Registration,
     hits: list[Hit],
     session: SessionMeta,
+    method: Method = "manual",
+    model: str | None = None,
 ) -> ShipPayload:
     return ShipPayload(
         image_sha256=image_sha256,
         canon_size_px=profile.canon_size_px,
-        method="manual",
-        model=None,
+        method=method,
+        model=model,
         params=registration.params() | {"client_version": __version__},
         session=session,
         hits=hits,

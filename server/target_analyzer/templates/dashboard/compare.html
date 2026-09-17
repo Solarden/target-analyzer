@@ -11,8 +11,8 @@
       · <a href="?photo=on">show photo</a>
     {% endif %}
   </p>
-  {# Loops deliberately: a Phase-2 detector is one more interpretation row and shows
-     up as another column here with no change to this view. #}
+  {# Loops deliberately: a detector is one more interpretation row and shows up as
+     another column here with no change to this view. #}
   <div class="compare">
     {% for overlay, geom in overlays %}
       <div class="panel">
@@ -20,9 +20,21 @@
           {{ overlay.interpretation.method }}
           {% if overlay.interpretation.model %}<small>{{ overlay.interpretation.model }}</small>{% endif %}
         </h3>
+        {# Named per panel, because it is what decides whether two readings can be compared
+           at all: different versions are different geometry. #}
+        <p class="muted">{{ overlay.profile.name }} v{{ overlay.profile.version }}</p>
         {{ ui.target_svg(overlay, geom, show_photo) }}
         {{ ui.metrics_block(overlay.interpretation) }}
+        {% set against = versus.get(overlay.interpretation.id) %}
+        {% if against %}
+          <p class="muted">
+            Against the hand-marked reading: {{ against.matched }} matched ·
+            {{ against.missed }} missed · {{ against.spurious }} spurious
+            {% if against.offset_mm is not none %}· {{ against.offset_mm | mm }} apart{% endif %}
+          </p>
+        {% endif %}
       </div>
     {% endfor %}
   </div>
+  {% if overlays %}{{ ui.legend() }}{% endif %}
 {% endblock %}

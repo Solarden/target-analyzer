@@ -13,14 +13,18 @@ from pathlib import Path
 import cv2
 from pydantic import ValidationError
 
-from ta_client import ship
+from ta_client import cv_blob, ship
 from ta_client.config import get_settings
 from ta_client.hits import pick_hits
 from ta_client.load import load_stripped
 from ta_client.package import build_payload
 from ta_client.register import register_interactive
-from ta_shared.payload import SessionMeta
-from ta_shared.profile import load_profile
+from ta_shared.payload import GROUND_TRUTH_METHOD, SessionMeta
+from ta_shared.profile import load_profile, mm_per_px
+
+# The detectors this client can run. --method's choices and the call that runs one both
+# read it, so every name the flag accepts is a name that does something.
+DETECTORS = {"cv_blob": cv_blob.detect}
 
 
 def main(argv: list[str]) -> int:
@@ -36,6 +40,12 @@ def main(argv: list[str]) -> int:
         help="the day it was shot (default: today) — EXIF is stripped, so it cannot be derived",
     )
     parser.add_argument("--notes", default="")
+    parser.add_argument(
+        "--method",
+        choices=(GROUND_TRUTH_METHOD, *DETECTORS),
+        default=GROUND_TRUTH_METHOD,
+        help="run this detector first and correct what it proposes (default: manual)",
+    )
     # No default: the profile is the scoring geometry, and picking the wrong one produces
     # a complete, plausible session with every hit in the wrong ring and nothing to say so.
     parser.add_argument(
@@ -77,6 +87,11 @@ def main(argv: list[str]) -> int:
         except ship.ShipError as exc:
             parser.error(str(exc))
 
+    # Same reason: a detector sizes a hole from the profile's physical scale, and raising
+    # that after the photo has been registered by hand throws the registration away.
+    if args.method != GROUND_TRUTH_METHOD and mm_per_px(profile) is None:
+        parser.error(f"--method {args.method} needs a profile with target_diam_mm")
+
     photo, original_jpg, digest = load_stripped(args.photo)
     registration = register_interactive(photo, profile)
 
@@ -85,31 +100,49 @@ def main(argv: list[str]) -> int:
 
         return 1
 
-    hits = pick_hits(registration.normalized, profile)
+    detector = DETECTORS.get(args.method)
+    proposal = None
+
+    if detector is not None:
+        proposal = detector(registration.normalized, profile)
+        print(f"{args.method} proposes {len(proposal)} holes", file=sys.stderr)
+
+    hits = pick_hits(registration.normalized, profile, proposal)
 
     if hits is None:
         print("marking cancelled", file=sys.stderr)
 
         return 1
 
-    payload = build_payload(
-        image_sha256=digest,
-        profile=profile,
-        registration=registration,
-        hits=hits,
-        session=session,
-    )
+    # Both readings of the one photo: corrected in place, the row would measure the
+    # person rather than the detector, and leave nothing to compare it against.
+    readings = [(GROUND_TRUTH_METHOD, hits)]
+
+    if proposal is not None:
+        readings.append((args.method, proposal))
+
     ok, buffer = cv2.imencode(".png", registration.normalized)
 
     if not ok:
         raise ValueError("could not encode the normalized image")
 
     outbox = args.outbox or settings.outbox_path
-    destination = ship.enqueue(
-        outbox, payload, buffer.tobytes(), original_jpg if settings.ship_original else None
-    )
     print(f"{len(hits)} hits · {registration.summary(profile)}")
-    print(f"{digest[:12]} -> {destination}")
+
+    for position, (method, reading) in enumerate(readings):
+        payload = build_payload(
+            image_sha256=digest,
+            profile=profile,
+            registration=registration,
+            hits=reading,
+            session=session,
+            method=method,
+        )
+        # Only with the reading the outbox sends first, which is the one that creates the
+        # image row. The server re-hashes a second copy and then has nowhere to put it.
+        original = original_jpg if settings.ship_original and position == 0 else None
+        destination = ship.enqueue(outbox, payload, buffer.tobytes(), original)
+        print(f"{digest[:12]} {method} -> {destination}")
 
     if not settings.server_url:
         print("TA_SERVER_URL is not set — the session stays queued", file=sys.stderr)

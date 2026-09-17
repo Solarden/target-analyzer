@@ -100,6 +100,7 @@ uv run python -m ta_client.board profiles/issf_precision.json --out board.svg
 uv run python -m ta_client.selfcheck
 uv run python -m ta_client photo.jpg --gun "CZ 75" --distance 25 --profile profiles/issf_precision.json
 uv run python -m ta_client.ship          # drain the outbox without processing a photo
+uv run python -m ta_client.cv_blob out/<session>   # score the blob detector against a marked session
 ```
 
 The client reads its settings from `~/.config/target-analyzer/env` — never from the
@@ -123,6 +124,12 @@ server; if the server is unreachable it stays in the outbox
 (`~/.target-analyzer/outbox/`, overridable with `--outbox`) and the next run sends it,
 oldest first. Ingest is idempotent on the photo's sha256, so a replayed flush never
 creates a second session.
+
+`--method cv_blob` runs the blob detector first and opens the hole picker on what it
+found, to drag, delete or add to. Both readings are then sent — the detector's untouched
+one and yours — and the dashboard's Compare view puts them side by side with the
+difference between them counted. Expect to correct it: a hole and last week's patched
+hole look alike, so on a reused target most of what it proposes is not from this string.
 
 `--profile` has no default on purpose: it is the geometry every hit is scored against,
 and the wrong one produces a complete, plausible session in which every shot is in the

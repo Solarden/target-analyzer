@@ -12,6 +12,13 @@ from pydantic import BaseModel, Field
 # Blast radius, not realism: every hit becomes a row inserted in one transaction.
 MAX_HITS = 200
 
+# The detectors that exist. A client that runs one must find its name here, or the
+# payload it builds is refused.
+Method = Literal["manual", "cv_blob"]
+# The hand-marked reading: the one a person confirmed, and the baseline every detector is
+# measured against. Both sides order by it, so both sides read it from here.
+GROUND_TRUTH_METHOD: Method = "manual"
+
 
 class Hit(BaseModel):
     # A non-finite coordinate scores as a miss and then breaks the metrics JSON. The
@@ -36,7 +43,9 @@ class ShipPayload(BaseModel):
     # The idempotency key, and a unique index: lowercase hex or nothing.
     image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     canon_size_px: int = Field(gt=0)  # must equal the profile's (the frame contract)
-    method: Literal["manual"] = "manual"  # Phase 2 adds cv_blob | vlm | yolo
+    # Which detector produced these hits. One reading per method per photo, so a second
+    # method on one photo is another interpretation rather than a replacement.
+    method: Method = "manual"
     model: str | None = None
     params: dict = Field(default_factory=dict)
     session: SessionMeta

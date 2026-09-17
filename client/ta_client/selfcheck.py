@@ -22,15 +22,17 @@ import cv2
 import httpx2
 import numpy as np
 
-from ta_client import ship
+from ta_client import cv_blob, ship
 from ta_client.board import render_markers, render_svg
 from ta_client.config import Settings
 from ta_client.load import load_stripped
 from ta_client.package import build_payload
 from ta_client.pick import _loupe, _Picking
 from ta_client.register import Registration, TooFewMarkers, refine_to_rings, register, warp
+from ta_client.ship import _parts
+from ta_shared.agreement import MATCH_TOL_MM, agreement
 from ta_shared.payload import Hit, SessionMeta, ShipPayload
-from ta_shared.profile import TargetProfile, load_profile
+from ta_shared.profile import TargetProfile, load_profile, mm_per_px
 
 # Stands in for the machine token wherever a Settings is built here. Not a credential:
 # nothing in this file reaches a network, so no server ever sees it.
@@ -87,6 +89,37 @@ def _queue(outbox: Path, *names: str) -> None:
         folder.mkdir(parents=True)
         (folder / "payload.json").write_text("{}", encoding="utf-8")
         (folder / "normalized.png").write_bytes(b"png")
+
+
+def _clean_target(profile: TargetProfile) -> tuple[np.ndarray, list[tuple[float, float]]]:
+    """An unmarked target with holes punched at known places, half of them on the black.
+
+    Polarity is the point: paper is light and a hole through it is dark, while on the
+    black aiming area the torn edge catches the light and the same hole is pale.
+    """
+    size = profile.canon_size_px
+    centre = (size // 2, size // 2)
+    image = np.full((size, size, 3), 235, np.uint8)
+    cv2.circle(image, centre, profile.ring_radius_px(profile.black_ring), (30, 30, 30), -1)
+
+    for radius in profile.ring_radii_px:
+        cv2.circle(image, centre, radius, (90, 90, 90), 1, cv2.LINE_AA)
+
+    radius = round(cv_blob.DEFAULT_HOLE_DIAM_MM / mm_per_px(profile) / 2)
+    black = profile.ring_radius_px(profile.black_ring)
+    holes = [
+        (centre[0] + black * 0.4, centre[1] - black * 0.3),
+        (centre[0] - black * 0.5, centre[1] + black * 0.2),
+        (centre[0] + black * 2.0, centre[1] + black * 0.4),
+        (centre[0] - black * 1.6, centre[1] - black * 1.5),
+    ]
+
+    for x, y in holes:
+        on_black = np.hypot(x - centre[0], y - centre[1]) <= black
+        colour = (205, 205, 205) if on_black else (15, 15, 15)
+        cv2.circle(image, (round(x), round(y)), radius, colour, -1, cv2.LINE_AA)
+
+    return image, holes
 
 
 def _settings(**overrides) -> Settings:
@@ -249,6 +282,18 @@ def selfcheck() -> None:
     picking.on_mouse(cv2.EVENT_MOUSEMOVE, 160, 160, cv2.EVENT_FLAG_LBUTTON)
     assert len(picking.points) == 1, picking.points
 
+    seeded = _Picking(scale=1.0, points=[(10.0, 10.0), (50.0, 50.0), (90.0, 90.0)])
+    seeded.hover = (50.0, 50.0)
+    seeded.undo()
+    assert seeded.points == [(10.0, 10.0), (90.0, 90.0)], "the point under the cursor goes"
+
+    seeded.hover = (400.0, 400.0)
+    seeded.undo()
+    assert seeded.points == [(10.0, 10.0)], "with nothing under the cursor, the last one goes"
+
+    seeded.clear()
+    assert seeded.points == []
+
     # The loupe crops around the cursor, so a mark at the very edge of the frame is the
     # case that would slice out of bounds.
     big = np.full((400, 600, 3), 120, np.uint8)
@@ -264,6 +309,35 @@ def selfcheck() -> None:
     _loupe(big, cramped, (300.0, 200.0), 0.5)
     assert cramped.min() == cramped.max() == 120
 
+    # --- the blob detector finds holes on clean paper, whichever way they read ---
+    pistol = load_profile(PISTOL_JSON)
+    target, punched = _clean_target(pistol)
+    proposal = cv_blob.detect(target, pistol)
+    found = agreement(
+        punched,
+        [(hit.x_canon, hit.y_canon) for hit in proposal],
+        MATCH_TOL_MM / mm_per_px(pistol),
+    )
+    assert found.matched == len(punched), (found, len(proposal))
+    assert found.spurious == 0, found
+    assert all(0 < hit.confidence <= 1 for hit in proposal), proposal
+    # Strongest first, which is the order a person reads a proposal in.
+    assert [hit.confidence for hit in proposal] == sorted(
+        (hit.confidence for hit in proposal), reverse=True
+    )
+
+    # Neither of these can be inferred from the pixels, and a guess at either mis-tunes
+    # every step of the detector in silence.
+    for broken, hint in (
+        (pistol.model_copy(update={"target_diam_mm": None}), "target_diam_mm"),
+        (load_profile(PROFILE_JSON), "canonical square"),
+    ):
+        try:
+            cv_blob.detect(target, broken)
+            raise AssertionError(f"{hint} must be refused")
+        except ValueError as exc:
+            assert hint in str(exc), str(exc)
+
     # --- the printable sheet is to scale ---
     svg = render_svg(profile)
     assert 'width="175.500mm"' in svg  # 155.5 mm of target plus the two 10 mm margins
@@ -278,11 +352,15 @@ def selfcheck() -> None:
 
         order = root / "order"
         # Hand-named rather than enqueued, which would stamp three near-identical epochs.
-        _queue(order, "2-aaaaaaaaaaaa", "10-bbbbbbbbbbbb", "1-cccccccccccc")
+        _queue(order, "2-aaaaaaaaaaaa-manual", "10-bbbbbbbbbbbb-manual", "1-cccccccccccc-manual")
         # The two things that share the directory without being sessions.
-        (order / ".10-bbbbbbbbbbbb-x9k2").mkdir()
+        (order / ".10-bbbbbbbbbbbb-manual-x9k2").mkdir()
         (order / "failed").mkdir()
-        oldest_first = ["1-cccccccccccc", "2-aaaaaaaaaaaa", "10-bbbbbbbbbbbb"]
+        oldest_first = [
+            "1-cccccccccccc-manual",
+            "2-aaaaaaaaaaaa-manual",
+            "10-bbbbbbbbbbbb-manual",
+        ]
         assert [p.name for p in ship.pending(order)] == oldest_first, ship.pending(order)
 
         settings = _settings(server_url="https://example.invalid/", ingest_token=FAKE_TOKEN)
@@ -300,7 +378,9 @@ def selfcheck() -> None:
         assert ship.pending(order) == [], ship.pending(order)
 
         offline = root / "offline"
-        _queue(offline, "20-dddddddddddd", "21-eeeeeeeeeeee", "22-ffffffffffff")
+        _queue(
+            offline, "20-dddddddddddd-manual", "21-eeeeeeeeeeee-manual", "22-ffffffffffff-manual"
+        )
         tried: list[str] = []
 
         def drops(_client, folder: Path, _settings) -> SimpleNamespace:
@@ -312,18 +392,24 @@ def selfcheck() -> None:
             return _reply(201)
 
         assert ship.flush(offline, settings=settings, send=drops) == 2
-        assert tried == ["20-dddddddddddd", "21-eeeeeeeeeeee"], tried
+        assert tried == ["20-dddddddddddd-manual", "21-eeeeeeeeeeee-manual"], tried
         # The one that failed is kept and the one behind it was never attempted, so the
         # next run resends in the same order rather than skipping a session.
-        assert [p.name for p in ship.pending(offline)] == ["21-eeeeeeeeeeee", "22-ffffffffffff"]
+        assert [p.name for p in ship.pending(offline)] == [
+            "21-eeeeeeeeeeee-manual",
+            "22-ffffffffffff-manual",
+        ]
 
         # A 500 says the server is broken, not this folder — the same answer as a dropped
         # connection, and the one an unhandled exception in ingest actually produces.
         assert ship.flush(offline, settings=settings, send=lambda *_: _reply(500)) == 2
-        assert [p.name for p in ship.pending(offline)] == ["21-eeeeeeeeeeee", "22-ffffffffffff"]
+        assert [p.name for p in ship.pending(offline)] == [
+            "21-eeeeeeeeeeee-manual",
+            "22-ffffffffffff-manual",
+        ]
 
         refused = root / "refused"
-        _queue(refused, "40-111111111111")
+        _queue(refused, "40-111111111111-manual")
 
         # Both stop shipping, but for different reasons, and the message is the whole point:
         # a redirect means the URL's scheme is wrong, never that the folder should be binned.
@@ -334,18 +420,39 @@ def selfcheck() -> None:
             except ship.ShipError as exc:
                 assert hint in str(exc), (code, str(exc))
 
-            assert [p.name for p in ship.pending(refused)] == ["40-111111111111"], code
+            assert [p.name for p in ship.pending(refused)] == ["40-111111111111-manual"], code
 
-        # Two markings of one photo, and an unrelated third.
+        # Two readings of one photo by one method, and an unrelated third.
         deduped = root / "deduped"
-        _queue(deduped, "30-abcdefabcdef", "31-abcdefabcdef", "32-0123456789ab")
-        assert [p.name for p in ship.pending(deduped)] == ["31-abcdefabcdef", "32-0123456789ab"]
-        assert not (deduped / "30-abcdefabcdef").exists()
+        _queue(
+            deduped, "30-abcdefabcdef-manual", "31-abcdefabcdef-manual", "32-0123456789ab-manual"
+        )
+        assert [p.name for p in ship.pending(deduped)] == [
+            "31-abcdefabcdef-manual",
+            "32-0123456789ab-manual",
+        ]
+        assert not (deduped / "30-abcdefabcdef-manual").exists()
+
+        # Two *methods* of one photo are two readings to compare, so neither supersedes the
+        # other — the case a key of photo alone would silently delete half of.
+        both = root / "both"
+        _queue(both, "33-abcdefabcdef-manual", "34-abcdefabcdef-cv_blob")
+        assert len(ship.pending(both)) == 2, ship.pending(both)
+
+        # A tie on the epoch, which is what one run of the client produces.
+        tied = root / "tied"
+        _queue(tied, "35-abcdefabcdef-cv_blob", "35-abcdefabcdef-manual")
+        assert [_parts(p).method for p in ship.pending(tied)] == ["manual", "cv_blob"]
+
+        # A folder with no method in its name.
+        legacy = root / "legacy"
+        _queue(legacy, "36-abcdefabcdef")
+        assert [p.name for p in ship.pending(legacy)] == ["36-abcdefabcdef"]
 
         without = ship.enqueue(root / "without", payload, b"png", None)
         assert not (without / "original.jpg").exists()
         assert ship.pending(root / "without") == [without]
-        assert without.name.endswith(f"-{payload.image_sha256[:12]}"), without.name
+        assert without.name.endswith(f"-{payload.image_sha256[:12]}-{payload.method}"), without.name
         complete = ship.enqueue(root / "with", payload, b"png", b"jpg")
         assert (complete / "original.jpg").is_file()
 

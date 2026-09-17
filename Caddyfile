@@ -15,7 +15,7 @@
 	@offlan not remote_ip 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 127.0.0.1/8
 	respond @offlan "Forbidden" 403
 
-	# No header block: the app sets CSP, HSTS, frame-ancestors and nosniff itself, so they
-	# hold behind any proxy rather than only this one.
+	# The app sets CSP, HSTS, frame-ancestors and nosniff itself, so they hold behind any
+	# proxy rather than only this one.
 	reverse_proxy app:8000
 }
