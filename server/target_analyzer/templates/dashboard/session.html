@@ -20,6 +20,12 @@
         {{ overlay.profile.name }} v{{ overlay.profile.version }} ·
         <a href="/dashboard/compare/{{ overlay.image.id }}">compare readings</a>
       </p>
+      {% if not overlay.confirmed %}
+        <p class="flash flash-error">
+          Nobody has confirmed this photo yet — these are a detector's holes, not a score,
+          and the session is not on the Trend.
+        </p>
+      {% endif %}
     </div>
   {% else %}
     <p class="muted">This session has no scored photo.</p>

@@ -83,6 +83,11 @@ class _Parts(NamedTuple):
     photo: str
     method: str
 
+    @property
+    def reading(self) -> tuple[str, str]:
+        """What supersedes what: one photo read by one method."""
+        return self.photo, self.method
+
 
 def _parts(folder: Path) -> _Parts:
     """A session folder's name, read back.
@@ -122,7 +127,7 @@ def pending(outbox: Path) -> list[Path]:
     )
     # The server keeps whichever marking reaches it first, so shipping the older of two
     # would make the stale one permanent and 409 the correction that replaced it.
-    keep = set({(_parts(p).photo, _parts(p).method): p for p in folders}.values())
+    keep = set({_parts(p).reading: p for p in folders}.values())
 
     for folder in folders:
         if folder not in keep:

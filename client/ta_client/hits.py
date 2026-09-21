@@ -22,7 +22,7 @@ def pick_hits(
     Confidence is ``None`` on everything that comes back: a person has looked at each
     point, so the detector's number does not describe it.
     """
-    title = "Click each hole" if not proposal else f"{len(proposal)} proposed — fix and confirm"
+    title = "Click each hole" if not proposal else f"{len(proposal)} proposed: fix and confirm"
     # Stop at the contract's cap here rather than letting the server reject a payload
     # after a whole string has been clicked.
     points = pick.pick_points(

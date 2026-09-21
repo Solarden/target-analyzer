@@ -5,12 +5,13 @@ scoring is persisted fails these too rather than only the ingest tests.
 """
 
 import re
+from datetime import date
 
 import pytest
 from fastapi import status
 from tests.conftest import make_jpeg, make_payload, post_ingest
 
-from ta_shared.payload import Hit
+from ta_shared.payload import Hit, SessionMeta
 from target_analyzer.config import get_settings
 from target_analyzer.models import Image, Interpretation
 from target_analyzer.templating import format_metres
@@ -125,6 +126,33 @@ def test_saving_notes_lands_back_at_the_notes_box_and_sticks(auth_client, ingest
     # The note is the context that stops a bad day reading as a regression, so it has to
     # reach the view the regression would show up in.
     assert "sore from gym" in auth_client.get("/dashboard").text
+
+
+def test_a_photo_nobody_confirmed_is_flagged_and_offers_no_filter(
+    auth_client, client, auth, ingested, png_bytes
+):
+    unconfirmed = make_payload(
+        # A different size is a different sha, which is what makes this a second session
+        # rather than a second reading of the one `ingested` already put in.
+        make_jpeg(size=48),
+        method="cv_blob",
+        session=SessionMeta(
+            gun="Unconfirmed Only",
+            distance_m=50,
+            shot_at=date(2026, 8, 1),
+            target_profile="issf_precision",
+            target_profile_version=1,
+        ),
+    )
+    posted = post_ingest(client, auth, unconfirmed, png_bytes)
+
+    assert posted.status_code == status.HTTP_201_CREATED
+
+    page = auth_client.get(f"/dashboard/session/{posted.json()['session_id']}")
+    trend = auth_client.get("/dashboard")
+
+    assert "Nobody has confirmed this photo yet" in page.text
+    assert "Unconfirmed Only" not in trend.text
 
 
 def test_a_detector_reading_does_not_reach_the_trend(

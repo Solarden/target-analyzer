@@ -45,15 +45,34 @@ def rows(
     return list(session.exec(statement).all())
 
 
+def _scored_sessions():
+    """Sessions with a confirmed reading — the only ones `rows` returns anything for.
+
+    The options have to agree with the table, or the filter offers a gun that selects an
+    empty chart.
+    """
+    return (
+        select(col(Image.session_id))
+        .join(Interpretation, col(Interpretation.image_id) == col(Image.id))
+        .where(Interpretation.method == GROUND_TRUTH_METHOD)
+    )
+
+
 def guns(session: Session) -> list[str]:
-    statement = select(distinct(col(ShootingSession.gun))).order_by(col(ShootingSession.gun))
+    statement = (
+        select(distinct(col(ShootingSession.gun)))
+        .where(col(ShootingSession.id).in_(_scored_sessions()))
+        .order_by(col(ShootingSession.gun))
+    )
 
     return list(session.exec(statement).all())
 
 
 def distances(session: Session) -> list[float]:
-    statement = select(distinct(col(ShootingSession.distance_m))).order_by(
-        col(ShootingSession.distance_m)
+    statement = (
+        select(distinct(col(ShootingSession.distance_m)))
+        .where(col(ShootingSession.id).in_(_scored_sessions()))
+        .order_by(col(ShootingSession.distance_m))
     )
 
     return list(session.exec(statement).all())

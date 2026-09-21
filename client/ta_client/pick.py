@@ -45,6 +45,14 @@ def _fit(image: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 def _open(title: str, image: np.ndarray) -> None:
+    """Show the window.
+
+    The title has to be ASCII: it reaches the OS title bar as bytes, and macOS renders
+    anything wider one byte at a time, so an em-dash arrives as three glyphs.
+    """
+    if not title.isascii():
+        raise ValueError(f"window title must be ASCII, got {title!r}")
+
     # AUTOSIZE keeps one window unit equal to one displayed pixel, which is what makes the
     # single scale factor above enough to map a click back to the image.
     cv2.namedWindow(title, cv2.WINDOW_AUTOSIZE)
@@ -193,15 +201,22 @@ def pick_points(
     """Collect clicked points, or ``None`` if the user cancelled.
 
     ``initial`` seeds the set, which is how a detector's proposal is corrected: it arrives
-    as ordinary points, with the same drag, undo and confirm as hand-placed ones, and is
-    truncated to ``max_points`` like anything clicked.
+    as ordinary points, with the same drag, undo and confirm as hand-placed ones. It is
+    truncated to whichever of ``max_points`` and ``exact`` applies, so the picker never
+    opens holding more than it will accept.
 
     ``None`` and ``[]`` mean different things: an empty list is a real answer (a string
     where every shot missed the paper), and collapsing the two would ship an empty
     session as though it had been confirmed.
     """
     canvas, scale = _fit(image)
-    state = _Picking(scale=scale, max_points=max_points, points=list(initial or [])[:max_points])
+    seeded = list(initial or [])
+
+    for cap in (max_points, exact):
+        if cap is not None:
+            seeded = seeded[:cap]
+
+    state = _Picking(scale=scale, max_points=max_points, points=seeded)
     points = state.points
 
     # Also on stderr because waitKey only sees keys while the cv2 window has focus, and a

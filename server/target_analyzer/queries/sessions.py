@@ -30,6 +30,11 @@ class Overlay:
     profile: TargetProfile
     holes: list[Hole]
 
+    @property
+    def confirmed(self) -> bool:
+        """Whether a person marked this reading, as opposed to a detector proposing it."""
+        return self.interpretation.method == GROUND_TRUTH_METHOD
+
 
 def _build(session: Session, pairs: list[tuple[Image, Interpretation]]) -> list[Overlay]:
     """Attach holes and profiles to (image, interpretation) pairs in two queries."""
