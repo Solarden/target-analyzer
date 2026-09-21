@@ -23,6 +23,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from ta_client.config import Settings
+from ta_client.detector import DetectorError
 from ta_shared.agreement import MATCH_TOL_MM, agreement
 from ta_shared.payload import MAX_HITS, Hit
 from ta_shared.profile import TargetProfile, load_profile, mm_per_px
@@ -39,6 +41,24 @@ MIN_RESPONSE_FRACTION = 0.7
 SURROUND_RATIO = 2.5
 
 
+def model_name(_settings: Settings | None = None) -> None:
+    """No model produced this reading: the detector is the algorithm."""
+    return None
+
+
+def check(_settings: Settings | None, profile: TargetProfile) -> None:
+    """Raise what ``detect`` would raise, early enough that no work is lost to it.
+
+    Takes settings it does not read, so the runner can ask every detector the same
+    question. ``None`` is the honest argument from a caller that has none to give.
+    """
+    if mm_per_px(profile) is None:
+        raise DetectorError(
+            f"{profile.name} v{profile.version} has no target_diam_mm, so a hole has no "
+            "size in canonical pixels"
+        )
+
+
 def detect(
     normalized: np.ndarray,
     profile: TargetProfile,
@@ -50,14 +70,8 @@ def detect(
     its canonical square. Both are things this needs and cannot infer, and a guess at
     either mis-tunes every step below in silence.
     """
+    check(None, profile)
     scale = mm_per_px(profile)
-
-    if scale is None:
-        raise ValueError(
-            f"{profile.name} v{profile.version} has no target_diam_mm, so a hole has no "
-            "size in canonical pixels"
-        )
-
     canon = profile.canon_size_px
 
     # Every measurement below is in the profile's geometry, so an image that is not its
@@ -113,7 +127,12 @@ def _report(folder: Path, payload: dict, profile: TargetProfile, hole_diam_mm: f
         raise SystemExit(f"no readable normalized.png in {folder}")
 
     truth = [(hit["x_canon"], hit["y_canon"]) for hit in payload["hits"]]
-    proposal = detect(normalized, profile, hole_diam_mm)
+
+    try:
+        proposal = detect(normalized, profile, hole_diam_mm)
+    except (DetectorError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+
     result = agreement(
         truth,
         [(hit.x_canon, hit.y_canon) for hit in proposal],

@@ -62,22 +62,18 @@ def test_replaying_the_same_flush_returns_the_existing_rows(
 def test_a_second_method_attaches_to_the_same_image(client, auth, profile, db_session, png_bytes):
     """The Phase-2 shape: one image, many readings, no schema change (§13).
 
-    Driven below HTTP on purpose. ``method`` is ``Literal["manual"]`` on the wire, so
-    the contract — correctly — refuses to let a ``cv_blob`` payload through the endpoint
-    today. What is worth proving now is the branch behind it: a second reading of a known
-    photo must attach to the *existing* image and session rather than mint new ones, and
-    must not write a second copy of the files. That is what UNIQUE(image_id, method)
-    exists for and what the Compare view will render side by side.
+    A second reading of a known photo attaches to the *existing* image and session rather
+    than minting new ones, and writes no second copy of the files. That is what
+    UNIQUE(image_id, method) exists for and what the Compare view renders side by side.
     """
     jpeg = make_jpeg()
     first = post_ingest(client, auth, make_payload(jpeg), png_bytes, jpeg=jpeg).json()
     on_disk = {p for p in get_settings().data_path.rglob("*") if p.is_file()}
 
-    ship = make_payload(jpeg)
-    ship.method = "cv_blob"  # no validate_assignment, so this bypasses the wire Literal
-    image = db_session.exec(select(Image)).one()
-    body = _ingest_onto_existing_image(db_session, Response(), image, profile, ship)
+    second = post_ingest(client, auth, make_payload(jpeg, method="cv_blob"), png_bytes, jpeg=jpeg)
+    body = second.json()
 
+    assert second.status_code == status.HTTP_201_CREATED
     assert body["duplicate"] is False
     assert body["image_id"] == first["image_id"]
     assert body["session_id"] == first["session_id"]

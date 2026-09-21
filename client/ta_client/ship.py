@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 import httpx2
 
-from ta_client.config import ENV_FILE, Settings, get_settings
+from ta_client.config import ENV_FILE, LOCAL, Settings, get_settings
 from ta_client.package import write_session_dir
 from ta_shared.payload import GROUND_TRUTH_METHOD, ShipPayload
 
@@ -34,7 +34,6 @@ DONE = (201, 409)
 # Separate from the upload timeout, so an unreachable server costs five seconds per
 # folder rather than sixty.
 CONNECT_TIMEOUT = 5.0
-LOCAL = ("localhost", "127.0.0.1", "::1")
 
 
 class ShipError(RuntimeError):

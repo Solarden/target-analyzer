@@ -13,18 +13,21 @@ from pathlib import Path
 import cv2
 from pydantic import ValidationError
 
-from ta_client import cv_blob, ship
+from ta_client import cv_blob, ship, vlm
 from ta_client.config import get_settings
+from ta_client.detector import DetectorError
 from ta_client.hits import pick_hits
 from ta_client.load import load_stripped
 from ta_client.package import build_payload
 from ta_client.register import register_interactive
 from ta_shared.payload import GROUND_TRUTH_METHOD, SessionMeta
-from ta_shared.profile import load_profile, mm_per_px
+from ta_shared.profile import load_profile
 
 # The detectors this client can run. --method's choices and the call that runs one both
-# read it, so every name the flag accepts is a name that does something.
-DETECTORS = {"cv_blob": cv_blob.detect}
+# read it, so every name the flag accepts is a name that does something. Modules rather
+# than functions, because a reading is three things the runner needs and one of them —
+# which model answered — is not in the hits.
+DETECTORS = {"cv_blob": cv_blob, "vlm": vlm}
 
 
 def main(argv: list[str]) -> int:
@@ -87,10 +90,15 @@ def main(argv: list[str]) -> int:
         except ship.ShipError as exc:
             parser.error(str(exc))
 
-    # Same reason: a detector sizes a hole from the profile's physical scale, and raising
-    # that after the photo has been registered by hand throws the registration away.
-    if args.method != GROUND_TRUTH_METHOD and mm_per_px(profile) is None:
-        parser.error(f"--method {args.method} needs a profile with target_diam_mm")
+    detector = DETECTORS.get(args.method)
+
+    # Same reason: whatever a detector needs — a physical scale, an endpoint to ask —
+    # raising it after the photo has been registered by hand throws the registration away.
+    if detector is not None:
+        try:
+            detector.check(settings, profile)
+        except DetectorError as exc:
+            parser.error(str(exc))
 
     photo, original_jpg, digest = load_stripped(args.photo)
     registration = register_interactive(photo, profile)
@@ -100,12 +108,16 @@ def main(argv: list[str]) -> int:
 
         return 1
 
-    detector = DETECTORS.get(args.method)
     proposal = None
 
     if detector is not None:
-        proposal = detector(registration.normalized, profile)
-        print(f"{args.method} proposes {len(proposal)} holes", file=sys.stderr)
+        try:
+            proposal = detector.detect(registration.normalized, profile)
+            print(f"{args.method} proposes {len(proposal)} holes", file=sys.stderr)
+        except DetectorError as exc:
+            # The registration is already spent by the time this can fail.
+            print(f"{args.method} could not read it: {exc}", file=sys.stderr)
+            print("marking by hand — only the second reading is lost", file=sys.stderr)
 
     hits = pick_hits(registration.normalized, profile, proposal)
 
@@ -116,10 +128,10 @@ def main(argv: list[str]) -> int:
 
     # Both readings of the one photo: corrected in place, the row would measure the
     # person rather than the detector, and leave nothing to compare it against.
-    readings = [(GROUND_TRUTH_METHOD, hits)]
+    readings = [(GROUND_TRUTH_METHOD, hits, None)]
 
     if proposal is not None:
-        readings.append((args.method, proposal))
+        readings.append((args.method, proposal, detector.model_name(settings)))
 
     ok, buffer = cv2.imencode(".png", registration.normalized)
 
@@ -129,7 +141,7 @@ def main(argv: list[str]) -> int:
     outbox = args.outbox or settings.outbox_path
     print(f"{len(hits)} hits · {registration.summary(profile)}")
 
-    for position, (method, reading) in enumerate(readings):
+    for position, (method, reading, model) in enumerate(readings):
         payload = build_payload(
             image_sha256=digest,
             profile=profile,
@@ -137,6 +149,7 @@ def main(argv: list[str]) -> int:
             hits=reading,
             session=session,
             method=method,
+            model=model,
         )
         # Only with the reading the outbox sends first, which is the one that creates the
         # image row. The server re-hashes a second copy and then has nowhere to put it.

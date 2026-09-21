@@ -101,6 +101,7 @@ uv run python -m ta_client.selfcheck
 uv run python -m ta_client photo.jpg --gun "CZ 75" --distance 25 --profile profiles/issf_precision.json
 uv run python -m ta_client.ship          # drain the outbox without processing a photo
 uv run python -m ta_client.cv_blob out/<session>   # score the blob detector against a marked session
+uv run python -m ta_client.vlm out/<session>       # same, for the vision model
 ```
 
 The client reads its settings from `~/.config/target-analyzer/env` — never from the
@@ -110,6 +111,11 @@ checkout, which is public:
 TA_SERVER_URL=https://target.example.com
 TA_INGEST_TOKEN=the-token-create_token-printed
 TA_SHIP_ORIGINAL=true
+
+# Only for --method vlm: any OpenAI-compatible endpoint that accepts an image.
+TA_VLM_BASE_URL=https://vision.example.com/v1
+TA_VLM_MODEL=the-model-tag
+TA_VLM_API_KEY=only-if-the-endpoint-wants-one
 ```
 
 `chmod 600` that file: it holds the bearer token. With `TA_SERVER_URL` unset the client
@@ -126,7 +132,10 @@ oldest first. Ingest is idempotent on the photo's sha256, so a replayed flush ne
 creates a second session.
 
 `--method cv_blob` runs the blob detector first and opens the hole picker on what it
-found, to drag, delete or add to. Both readings are then sent — the detector's untouched
+found, to drag, delete or add to. `--method vlm` does the same with a vision model, which
+trades the blob filter's sub-millimetre placement for the ability to tell a hole from a
+printed digit — a picture of a target is mostly things that are hole-shaped and are not
+holes. Both readings are then sent — the detector's untouched
 one and yours — and the dashboard's Compare view puts them side by side with the
 difference between them counted. Expect to correct it: a hole and last week's patched
 hole look alike, so on a reused target most of what it proposes is not from this string.

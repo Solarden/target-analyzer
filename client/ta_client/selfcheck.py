@@ -11,6 +11,7 @@ is the property the whole product rests on.
 """
 
 import hashlib
+import json
 import os
 import re
 import tempfile
@@ -22,9 +23,10 @@ import cv2
 import httpx2
 import numpy as np
 
-from ta_client import cv_blob, ship
+from ta_client import cv_blob, ship, vlm
 from ta_client.board import render_markers, render_svg
 from ta_client.config import Settings
+from ta_client.detector import DetectorError
 from ta_client.load import load_stripped
 from ta_client.package import build_payload
 from ta_client.pick import _loupe, _Picking
@@ -328,15 +330,105 @@ def selfcheck() -> None:
 
     # Neither of these can be inferred from the pixels, and a guess at either mis-tunes
     # every step of the detector in silence.
-    for broken, hint in (
-        (pistol.model_copy(update={"target_diam_mm": None}), "target_diam_mm"),
-        (load_profile(PROFILE_JSON), "canonical square"),
+    try:
+        cv_blob.detect(target, pistol.model_copy(update={"target_diam_mm": None}))
+        raise AssertionError("a profile with no scale must be refused")
+    except DetectorError as exc:
+        assert "target_diam_mm" in str(exc), str(exc)
+
+    try:
+        cv_blob.detect(target, load_profile(PROFILE_JSON))
+        raise AssertionError("an image that is not the canonical square must be refused")
+    except ValueError as exc:
+        assert not isinstance(exc, DetectorError), "a wrong frame is a bug, not a bad day"
+        assert "canonical square" in str(exc), str(exc)
+
+    # --- the vision detector, without a vision model ---
+    # Everything except the model: the prompt that goes out, the answer that comes back,
+    # and what each end refuses. The sender is injected, so nothing here reaches a network.
+    asked = _settings(vlm_base_url="https://model.invalid/v1", vlm_model="test-model")
+    sent: list[httpx2.Request] = []
+
+    def answering(content: str, status_code: int = 200):
+        def send(_client, request):
+            sent.append(request)
+
+            return SimpleNamespace(
+                status_code=status_code,
+                json=lambda: {"choices": [{"message": {"content": content}}]},
+                text=content,
+            )
+
+        return send
+
+    # Fenced, prefaced, a brace in the prose, and one hole outside the frame — every way a
+    # real answer arrives wrapped in something.
+    holes = '{"holes": [{"x": 700, "y": 800}, {"x": -5, "y": 10}]}'
+    fenced = f"Sure! (see {{the rings}}):\n```json\n{holes}\n```"
+    proposal = vlm.detect(target, pistol, settings=asked, send=answering(fenced))
+
+    assert [(h.x_canon, h.y_canon) for h in proposal] == [(700.0, 800.0)], proposal
+    assert vlm.parse_hits('{"holes": []}', 1500) == ([], 0), "an empty answer is a real answer"
+    assert vlm.model_name(asked) == "test-model", vlm.model_name(asked)
+    assert all(hit.confidence is None for hit in proposal), "no confidence is invented"
+
+    body = json.loads(sent[0].read())
+    content = body["messages"][0]["content"]
+
+    assert body["model"] == "test-model"
+    assert body["temperature"] == 0.0, "a detector that answers differently each run"
+    assert str(pistol.canon_size_px) in content[0]["text"], "the frame size is in the prompt"
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert "authorization" not in {k.lower() for k in sent[0].headers}, "no key, no header"
+
+    def parts(_client, request):
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {"choices": [{"message": {"content": [{"text": "{}"}]}}]},
+            text="[]",
+        )
+
+    for send, hint in (
+        (parts, "is list, not text"),
+        (answering("there is no object here"), "no JSON object"),
+        (answering('{"oops": []}'), "holes"),
+        (answering('{"holes": {"1": {"x": 1, "y": 2}}}'), "not a list"),
+        (answering('{"holes": [{"x": 1}]}'), "is not a hole"),
+        (answering("{}", status_code=503), "503"),
     ):
         try:
-            cv_blob.detect(target, broken)
+            vlm.detect(target, pistol, settings=asked, send=send)
             raise AssertionError(f"{hint} must be refused")
-        except ValueError as exc:
+        except vlm.VlmError as exc:
             assert hint in str(exc), str(exc)
+
+    # Config and frame are refused as ValueError, so the runner can treat every detector's
+    # preconditions the same way before anything interactive happens.
+    # Config refusals, every one of them survivable: the run drops to marking by hand.
+    for settings, hint in (
+        (_settings(), "TA_VLM_BASE_URL"),
+        (_settings(vlm_base_url="model.invalid/v1", vlm_model="m"), "full http:// or https://"),
+        (
+            _settings(vlm_base_url="http://model.invalid/v1", vlm_model="m", vlm_api_key="k"),
+            "cross the network in the clear",
+        ),
+    ):
+        try:
+            vlm.detect(target, pistol, settings=settings, send=answering("{}"))
+            raise AssertionError(f"{hint} must be refused")
+        except DetectorError as exc:
+            assert hint in str(exc), str(exc)
+
+    vlm.check(
+        _settings(vlm_base_url="http://127.0.0.1:1/v1", vlm_model="m", vlm_api_key="k"), pistol
+    )
+
+    try:
+        vlm.detect(np.zeros((10, 10, 3), np.uint8), pistol, settings=asked, send=answering("{}"))
+        raise AssertionError("an image that is not the canonical square must be refused")
+    except ValueError as exc:
+        assert not isinstance(exc, DetectorError), "a wrong frame is a bug, not a bad day"
+        assert "canonical square" in str(exc), str(exc)
 
     # --- the printable sheet is to scale ---
     svg = render_svg(profile)
