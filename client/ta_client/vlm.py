@@ -25,6 +25,7 @@ import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import cv2
@@ -32,10 +33,9 @@ import httpx2
 import numpy as np
 
 from ta_client.config import LOCAL, Settings, get_settings
-from ta_client.detector import DetectorError
-from ta_shared.agreement import MATCH_TOL_MM, agreement
+from ta_client.detector import DetectorError, load_session, report
 from ta_shared.payload import MAX_HITS, Hit
-from ta_shared.profile import TargetProfile, load_profile, mm_per_px
+from ta_shared.profile import TargetProfile
 
 # Deterministic, because a detector that answers differently on the same photo cannot be
 # compared against anything — including its own previous run.
@@ -100,8 +100,8 @@ def check(settings: Settings | None, _profile: TargetProfile) -> None:
         )
 
 
-def build_request(image_png: bytes, canon: int, settings: Settings) -> httpx2.Request:
-    """The one call, built separately so it can be read without a model to send it to."""
+def build_request(image_png: bytes, prompt: str, settings: Settings) -> httpx2.Request:
+    """One call, built separately so it can be read without a model to send it to."""
     encoded = base64.b64encode(image_png).decode("ascii")
     headers = {"Content-Type": "application/json"}
 
@@ -122,7 +122,7 @@ def build_request(image_png: bytes, canon: int, settings: Settings) -> httpx2.Re
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": PROMPT.format(canon=canon)},
+                        {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
                             "image_url": {"url": f"data:image/png;base64,{encoded}"},
@@ -141,8 +141,47 @@ def post(client: httpx2.Client, request: httpx2.Request) -> httpx2.Response:
     return client.send(request)
 
 
-def parse_hits(answer: str, canon: int) -> tuple[list[Hit], int]:
-    """The hole coordinates the model gave, and how many of them landed off the frame."""
+def encode(image: np.ndarray) -> bytes:
+    ok, buffer = cv2.imencode(".png", image)
+
+    if not ok:
+        raise VlmError("could not encode the image")
+
+    return buffer.tobytes()
+
+
+def client_for(settings: Settings) -> httpx2.Client:
+    """One client for a whole run, so asking many questions costs one handshake."""
+    return httpx2.Client(timeout=httpx2.Timeout(settings.vlm_timeout, connect=CONNECT_TIMEOUT))
+
+
+def ask(
+    client: httpx2.Client, image_png: bytes, prompt: str, settings: Settings, send: Sender
+) -> str:
+    """Put one image and one question to the model and return its answer as text."""
+    try:
+        response = send(client, build_request(image_png, prompt, settings))
+    except httpx2.RequestError as exc:
+        raise VlmError(f"{type(exc).__name__}: {exc}") from exc
+
+    if response.status_code != 200:
+        raise VlmError(f"the model answered {response.status_code}: {response.text[:200]}")
+
+    try:
+        answer = response.json()["choices"][0]["message"]["content"]
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+        raise VlmError(f"not an OpenAI-compatible reply: {exc}") from exc
+
+    # Some servers answer with a list of content parts rather than a string. Refused with
+    # the type named, so the message says what to add if this is ever the real shape.
+    if not isinstance(answer, str):
+        raise VlmError(f"the model's content is {type(answer).__name__}, not text")
+
+    return answer
+
+
+def first_json_object(answer: str) -> Any:
+    """The first JSON object in the model's answer."""
     # Fenced first. The brace span below runs from the first "{" to the last, which is
     # right for nested objects and wrong when the prose ahead of it carries a brace.
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", answer, re.DOTALL)
@@ -156,8 +195,16 @@ def parse_hits(answer: str, canon: int) -> tuple[list[Hit], int]:
         raise VlmError(f"no JSON object in the model's answer: {answer[:200]!r}")
 
     try:
-        holes = json.loads(match)["holes"]
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        return json.loads(match)
+    except json.JSONDecodeError as exc:
+        raise VlmError(f"the model's answer is not JSON: {exc}") from exc
+
+
+def parse_hits(answer: str, canon: int) -> tuple[list[Hit], int]:
+    """The hole coordinates the model gave, and how many of them landed off the frame."""
+    try:
+        holes = first_json_object(answer)["holes"]
+    except (KeyError, TypeError) as exc:
         raise VlmError(f"answer is not an object with a 'holes' key: {exc}") from exc
 
     # An empty list is a real answer — the model saw no holes. A shape we cannot read is
@@ -209,32 +256,9 @@ def detect(
 
     settings = settings or get_settings()
     check(settings, profile)
-    ok, buffer = cv2.imencode(".png", normalized)
 
-    if not ok:
-        raise VlmError("could not encode the normalized image")
-
-    request = build_request(buffer.tobytes(), canon, settings)
-    timeout = httpx2.Timeout(settings.vlm_timeout, connect=CONNECT_TIMEOUT)
-
-    try:
-        with httpx2.Client(timeout=timeout) as client:
-            response = send(client, request)
-    except httpx2.RequestError as exc:
-        raise VlmError(f"{type(exc).__name__}: {exc}") from exc
-
-    if response.status_code != 200:
-        raise VlmError(f"the model answered {response.status_code}: {response.text[:200]}")
-
-    try:
-        answer = response.json()["choices"][0]["message"]["content"]
-    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
-        raise VlmError(f"not an OpenAI-compatible reply: {exc}") from exc
-
-    # Some servers answer with a list of content parts rather than a string. Refused with
-    # the type named, so the message says what to add if this is ever the real shape.
-    if not isinstance(answer, str):
-        raise VlmError(f"the model's content is {type(answer).__name__}, not text")
+    with client_for(settings) as client:
+        answer = ask(client, encode(normalized), PROMPT.format(canon=canon), settings, send)
 
     hits, off_frame = parse_hits(answer, canon)
 
@@ -244,32 +268,6 @@ def detect(
         print(f"vlm: {off_frame} coordinates outside the frame, dropped", file=sys.stderr)
 
     return hits
-
-
-def _report(folder: Path, payload: dict, profile: TargetProfile) -> None:
-    """Measure one stored session: what the model finds against what a person marked."""
-    normalized = cv2.imread(str(folder / "normalized.png"))
-
-    if normalized is None:
-        raise SystemExit(f"no readable normalized.png in {folder}")
-
-    truth = [(hit["x_canon"], hit["y_canon"]) for hit in payload["hits"]]
-
-    try:
-        proposal = detect(normalized, profile)
-    except (DetectorError, ValueError) as exc:
-        raise SystemExit(str(exc)) from exc
-
-    result = agreement(
-        truth,
-        [(hit.x_canon, hit.y_canon) for hit in proposal],
-        MATCH_TOL_MM / mm_per_px(profile),
-    )
-    offset = "—" if result.mean_offset_px is None else f"{result.mean_offset_px:.1f} px"
-
-    print(f"{folder.name}: {len(truth)} marked by hand, {len(proposal)} proposed")
-    print(f"  matched {result.matched} · missed {result.missed} · spurious {result.spurious}")
-    print(f"  mean offset over the matched {offset}")
 
 
 def main(argv: list[str]) -> int:
@@ -283,22 +281,8 @@ def main(argv: list[str]) -> int:
         "--profile", type=Path, default=None, help="path to the target profile JSON"
     )
     args = parser.parse_args(argv)
-    marked = args.session / "payload.json"
-
-    if not marked.is_file():
-        raise SystemExit(f"no payload.json in {args.session}")
-
-    payload = json.loads(marked.read_text(encoding="utf-8"))
-    profile_path = args.profile or (
-        Path(__file__).resolve().parents[2]
-        / "profiles"
-        / f"{payload['session']['target_profile']}.json"
-    )
-
-    if not profile_path.is_file():
-        raise SystemExit(f"no profile at {profile_path} — pass --profile")
-
-    _report(args.session, payload, load_profile(profile_path))
+    payload, profile = load_session(args.session, args.profile)
+    report(args.session, payload, profile, detect)
 
     return 0
 

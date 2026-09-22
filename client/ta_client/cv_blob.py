@@ -16,7 +16,6 @@ proposal, because the suppression below keeps a single peak per hole's width.
 """
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -24,10 +23,9 @@ import cv2
 import numpy as np
 
 from ta_client.config import Settings
-from ta_client.detector import DetectorError
-from ta_shared.agreement import MATCH_TOL_MM, agreement
+from ta_client.detector import DetectorError, load_session, report
 from ta_shared.payload import MAX_HITS, Hit
-from ta_shared.profile import TargetProfile, load_profile, mm_per_px
+from ta_shared.profile import TargetProfile, mm_per_px
 
 # 5.6 mm is the smallest calibre this is used with, and a LoG tuned small still answers a
 # larger hole — the other way round it splits one hole into an annulus of weak peaks.
@@ -119,32 +117,6 @@ def detect(
     ]
 
 
-def _report(folder: Path, payload: dict, profile: TargetProfile, hole_diam_mm: float) -> None:
-    """Measure one stored session: what the detector finds against what a person marked."""
-    normalized = cv2.imread(str(folder / "normalized.png"))
-
-    if normalized is None:
-        raise SystemExit(f"no readable normalized.png in {folder}")
-
-    truth = [(hit["x_canon"], hit["y_canon"]) for hit in payload["hits"]]
-
-    try:
-        proposal = detect(normalized, profile, hole_diam_mm)
-    except (DetectorError, ValueError) as exc:
-        raise SystemExit(str(exc)) from exc
-
-    result = agreement(
-        truth,
-        [(hit.x_canon, hit.y_canon) for hit in proposal],
-        MATCH_TOL_MM / mm_per_px(profile),
-    )
-    offset = "—" if result.mean_offset_px is None else f"{result.mean_offset_px:.1f} px"
-
-    print(f"{folder.name}: {len(truth)} marked by hand, {len(proposal)} proposed")
-    print(f"  matched {result.matched} · missed {result.missed} · spurious {result.spurious}")
-    print(f"  mean offset over the matched {offset}")
-
-
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="ta_client.cv_blob", description="Score the blob detector against a marked session."
@@ -157,22 +129,8 @@ def main(argv: list[str]) -> int:
         "--profile", type=Path, default=None, help="path to the target profile JSON"
     )
     args = parser.parse_args(argv)
-    marked = args.session / "payload.json"
-
-    if not marked.is_file():
-        raise SystemExit(f"no payload.json in {args.session}")
-
-    payload = json.loads(marked.read_text(encoding="utf-8"))
-    profile_path = args.profile or (
-        Path(__file__).resolve().parents[2]
-        / "profiles"
-        / f"{payload['session']['target_profile']}.json"
-    )
-
-    if not profile_path.is_file():
-        raise SystemExit(f"no profile at {profile_path} — pass --profile")
-
-    _report(args.session, payload, load_profile(profile_path), args.hole_mm)
+    payload, profile = load_session(args.session, args.profile)
+    report(args.session, payload, profile, lambda image, p: detect(image, p, args.hole_mm))
 
     return 0
 

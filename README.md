@@ -102,6 +102,7 @@ uv run python -m ta_client photo.jpg --gun "CZ 75" --distance 25 --profile profi
 uv run python -m ta_client.ship          # drain the outbox without processing a photo
 uv run python -m ta_client.cv_blob out/<session>   # score the blob detector against a marked session
 uv run python -m ta_client.vlm out/<session>       # same, for the vision model
+uv run python -m ta_client.cv_blob_vlm out/<session>  # same, for the two together
 ```
 
 The client reads its settings from `~/.config/target-analyzer/env` — never from the
@@ -135,10 +136,18 @@ creates a second session.
 found, to drag, delete or add to. `--method vlm` does the same with a vision model, which
 trades the blob filter's sub-millimetre placement for the ability to tell a hole from a
 printed digit — a picture of a target is mostly things that are hole-shaped and are not
-holes. Both readings are then sent — the detector's untouched
-one and yours — and the dashboard's Compare view puts them side by side with the
-difference between them counted. Expect to correct it: a hole and last week's patched
-hole look alike, so on a reused target most of what it proposes is not from this string.
+holes.
+
+`--method cv_blob_vlm` is the two together, and on a measured target it is the better of
+them: the blob filter proposes, the model is shown a close crop of each proposal and asked
+whether it is really a hole, and the survivors keep the blob filter's coordinates. It costs
+one model call per proposal rather than one per photo, so it is the slowest method by some
+way.
+
+Both readings are then sent — the detector's untouched one and yours — and the dashboard's
+Compare view puts them side by side with the difference between them counted. Expect to
+correct any of them: a hole and last week's patched hole look alike, so on a reused target
+much of what a detector proposes is not from this string.
 
 `--profile` has no default on purpose: it is the geometry every hit is scored against,
 and the wrong one produces a complete, plausible session in which every shot is in the

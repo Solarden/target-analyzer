@@ -1,4 +1,4 @@
-"""What a detector is. See implementation.md §9 and §13.
+"""What a detector is, and how one is measured. See implementation.md §9 and §13.
 
 A detector is a module, not a function, because a reading is three things the runner needs:
 
@@ -17,6 +17,21 @@ A detector is a module, not a function, because a reading is three things the ru
     where the detector is the algorithm.
 """
 
+import json
+from collections.abc import Callable
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+from ta_shared.agreement import MATCH_TOL_MM, agreement
+from ta_shared.payload import Hit
+from ta_shared.profile import TargetProfile, load_profile, mm_per_px
+
+PROFILES = Path(__file__).resolve().parents[2] / "profiles"
+
+Detect = Callable[[np.ndarray, TargetProfile], list[Hit]]
+
 
 class DetectorError(RuntimeError):
     """This detector cannot produce a reading now.
@@ -26,3 +41,45 @@ class DetectorError(RuntimeError):
     still marks the holes by hand and that reading still ships. A ``ValueError`` from a
     detector means it was called wrongly, and should stop the run.
     """
+
+
+def load_session(session: Path, profile: Path | None) -> tuple[dict, TargetProfile]:
+    """A stored session's payload, and the profile it was scored against."""
+    marked = session / "payload.json"
+
+    if not marked.is_file():
+        raise SystemExit(f"no payload.json in {session}")
+
+    payload = json.loads(marked.read_text(encoding="utf-8"))
+    path = profile or PROFILES / f"{payload['session']['target_profile']}.json"
+
+    if not path.is_file():
+        raise SystemExit(f"no profile at {path} — pass --profile")
+
+    return payload, load_profile(path)
+
+
+def report(session: Path, payload: dict, profile: TargetProfile, detect: Detect) -> None:
+    """Measure one stored session: what a detector finds against what a person marked."""
+    normalized = cv2.imread(str(session / "normalized.png"))
+
+    if normalized is None:
+        raise SystemExit(f"no readable normalized.png in {session}")
+
+    truth = [(hit["x_canon"], hit["y_canon"]) for hit in payload["hits"]]
+
+    try:
+        proposal = detect(normalized, profile)
+    except (DetectorError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+
+    result = agreement(
+        truth,
+        [(hit.x_canon, hit.y_canon) for hit in proposal],
+        MATCH_TOL_MM / mm_per_px(profile),
+    )
+    offset = "—" if result.mean_offset_px is None else f"{result.mean_offset_px:.1f} px"
+
+    print(f"{session.name}: {len(truth)} marked by hand, {len(proposal)} proposed")
+    print(f"  matched {result.matched} · missed {result.missed} · spurious {result.spurious}")
+    print(f"  mean offset over the matched {offset}")

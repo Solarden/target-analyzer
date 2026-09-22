@@ -23,7 +23,7 @@ import cv2
 import httpx2
 import numpy as np
 
-from ta_client import cv_blob, ship, vlm
+from ta_client import cv_blob, cv_blob_vlm, ship, vlm
 from ta_client.board import render_markers, render_svg
 from ta_client.config import Settings
 from ta_client.detector import DetectorError
@@ -402,8 +402,6 @@ def selfcheck() -> None:
         except vlm.VlmError as exc:
             assert hint in str(exc), str(exc)
 
-    # Config and frame are refused as ValueError, so the runner can treat every detector's
-    # preconditions the same way before anything interactive happens.
     # Config refusals, every one of them survivable: the run drops to marking by hand.
     for settings, hint in (
         (_settings(), "TA_VLM_BASE_URL"),
@@ -429,6 +427,55 @@ def selfcheck() -> None:
     except ValueError as exc:
         assert not isinstance(exc, DetectorError), "a wrong frame is a bug, not a bad day"
         assert "canonical square" in str(exc), str(exc)
+
+    # --- the blob filter the model vets, without a vision model ---
+    candidates = cv_blob.detect(target, pistol)
+    crops: list[dict] = []
+
+    def judging(*verdicts: str):
+        answers = iter(verdicts)
+
+        def send(_client, request):
+            crops.append(json.loads(request.read()))
+            content = json.dumps({"answer": next(answers)})
+
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {"choices": [{"message": {"content": content}}]},
+                text="",
+            )
+
+        return send
+
+    verdicts = ["hole" if index % 2 == 0 else "not" for index in range(len(candidates))]
+    kept = cv_blob_vlm.detect(target, pistol, settings=asked, send=judging(*verdicts))
+    expected = [c for c, verdict in zip(candidates, verdicts, strict=True) if verdict == "hole"]
+
+    assert len(crops) == len(candidates), "one question per candidate"
+    assert [(h.x_canon, h.y_canon) for h in kept] == [(c.x_canon, c.y_canon) for c in expected], (
+        "the model replaces the judgement, never the coordinates"
+    )
+
+    sent_crop = crops[0]["messages"][0]["content"]
+
+    assert sent_crop[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert "centre" in sent_crop[0]["text"], "the prompt has to say which object it means"
+
+    for answer, hint in (
+        ('{"answer": "maybe"}', "neither 'hole' nor 'not'"),
+        ('{"nope": 1}', "'answer' key"),
+    ):
+        try:
+            cv_blob_vlm.verdict(answer)
+            raise AssertionError(f"{hint} must be refused")
+        except vlm.VlmError as exc:
+            assert hint in str(exc), str(exc)
+
+    try:
+        cv_blob_vlm.detect(target, pistol, settings=_settings(), send=judging("hole"))
+        raise AssertionError("a missing endpoint must be refused")
+    except DetectorError as exc:
+        assert "TA_VLM_BASE_URL" in str(exc), str(exc)
 
     # --- the printable sheet is to scale ---
     svg = render_svg(profile)

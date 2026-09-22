@@ -14,7 +14,7 @@ MAX_HITS = 200
 
 # The detectors that exist. A client that runs one must find its name here, or the
 # payload it builds is refused.
-Method = Literal["manual", "cv_blob", "vlm"]
+Method = Literal["manual", "cv_blob", "vlm", "cv_blob_vlm"]
 # The hand-marked reading: the one a person confirmed, and the baseline every detector is
 # measured against. Both sides order by it, so both sides read it from here.
 GROUND_TRUTH_METHOD: Method = "manual"
