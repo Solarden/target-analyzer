@@ -12,6 +12,9 @@ from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_FILE = Path.home() / ".config" / "target-analyzer" / "env"
+# Hostnames that mean this machine, so a plain-http URL naming one carries a credential
+# nowhere. Beside the settings because both callers read a URL out of them.
+LOCAL = ("localhost", "127.0.0.1", "::1")
 
 
 class Settings(BaseSettings):
@@ -28,6 +31,15 @@ class Settings(BaseSettings):
     # Covers the upload: several megabytes over bad wifi exceeds httpx's 5 s default, and
     # the folder then re-queues forever while looking like a network fault.
     ship_timeout: float = 60.0
+
+    # Where a vision model answers, in the OpenAI-compatible shape. Unset is the off
+    # switch, like server_url: the other detectors and the manual path keep working.
+    vlm_base_url: str = ""
+    vlm_model: str = ""
+    vlm_api_key: SecretStr = SecretStr("")
+    # A model that is not already resident costs most of a minute to load before it reads
+    # anything, so this is a first-call budget rather than a per-image one.
+    vlm_timeout: float = 180.0
 
 
 @lru_cache

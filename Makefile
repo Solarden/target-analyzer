@@ -13,6 +13,10 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
+# The macOS release binary ships with a signature that does not match its own bytes, and
+# the OS answers that with SIGKILL and no message. Re-signing ad hoc is what makes it run,
+# and a failed signing deletes the download — kept, it would satisfy the test -x above and
+# every later build would run straight into that silent kill.
 tailwind-cli: ## Fetch the standalone Tailwind CLI if it isn't here yet
 	@test -x $(TAILWIND_BIN) && echo "Tailwind CLI present" || ( \
 		mkdir -p tools && \
@@ -27,7 +31,9 @@ tailwind-cli: ## Fetch the standalone Tailwind CLI if it isn't here yet
 		echo "downloading $$asset ($(TAILWIND_VERSION))" ; \
 		curl -sL -o $(TAILWIND_BIN) \
 			https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/$$asset && \
-		chmod +x $(TAILWIND_BIN) )
+		chmod +x $(TAILWIND_BIN) && \
+		case "$$os" in Darwin) codesign --force --sign - $(TAILWIND_BIN) || \
+			{ rm -f $(TAILWIND_BIN) ; false ; } ;; esac )
 
 css: tailwind-cli ## Build the dashboard CSS (minified) into the static dir
 	$(TAILWIND_BIN) -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --minify

@@ -31,8 +31,10 @@
 }
 
 @layer base {
+  /* Column flex so the footer lands at the bottom of the viewport: most pages here are
+   * short, and a footer floating a third of the way down leaves a screen of nothing. */
   body {
-    @apply m-0 bg-bg text-fg font-sans leading-normal;
+    @apply m-0 flex min-h-screen flex-col bg-bg text-fg font-sans leading-normal;
     font-size: 15px;
     color-scheme: dark;
   }
@@ -54,7 +56,7 @@
   }
 
   main {
-    @apply mx-auto max-w-[1100px] px-6 py-5;
+    @apply mx-auto w-full max-w-[1100px] grow px-6 py-5;
   }
   main a {
     @apply text-accent no-underline hover:underline;
@@ -129,6 +131,11 @@
   .panel-narrow {
     @apply mx-auto mt-10 max-w-[360px];
   }
+  /* Scoped rather than set on `input`, so the dashboard's inline filters keep their own
+   * width. */
+  .panel-narrow input {
+    @apply w-full;
+  }
   .muted {
     @apply text-muted;
   }
@@ -182,6 +189,13 @@
     @apply fill-neg;
   }
 
+  .legend {
+    @apply text-center text-xs text-muted;
+  }
+  .swatch {
+    @apply inline-block h-3 w-3 align-[-0.15em];
+  }
+
   .metrics {
     @apply my-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm;
   }
@@ -192,10 +206,12 @@
     @apply m-0 tabular-nums;
   }
 
+  /* auto-FILL, not auto-fit: a reading left alone on the last row keeps one column's
+   * width instead of stretching across the whole grid. */
   .compare {
-    @apply flex flex-wrap gap-4;
+    @apply grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4;
   }
   .compare > .panel {
-    @apply min-w-[280px] flex-1;
+    @apply min-w-0;
   }
 }

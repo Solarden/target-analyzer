@@ -9,11 +9,11 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, col, select
 
+from ta_shared import payload
 from target_analyzer.models import Hole, Image, Interpretation, ShootingSession, TargetProfile
 
-# The hand-marked reading is the ground truth every other method is measured against
-# (§13), so it is the one Session draws; Compare is where the others earn their place.
-GROUND_TRUTH_METHOD = "manual"
+# The reading Session draws; Compare is where the others earn their place (§13).
+GROUND_TRUTH_METHOD = payload.GROUND_TRUTH_METHOD
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,11 @@ class Overlay:
     interpretation: Interpretation
     profile: TargetProfile
     holes: list[Hole]
+
+    @property
+    def confirmed(self) -> bool:
+        """Whether a person marked this reading, as opposed to a detector proposing it."""
+        return self.interpretation.method == GROUND_TRUTH_METHOD
 
 
 def _build(session: Session, pairs: list[tuple[Image, Interpretation]]) -> list[Overlay]:

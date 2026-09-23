@@ -28,7 +28,10 @@ LOUPE_WINDOW_PX = 44
 POINT_COLOUR = (0, 140, 255)
 READY_COLOUR = (0, 190, 0)
 FONT = cv2.FONT_HERSHEY_SIMPLEX
-KEYS = "left-click add · drag to move · u / right-click undo · Enter confirm · Esc cancel"
+KEYS = (
+    "left-click add · drag to move · u / right-click undo · shift-C clear · "
+    "Enter confirm · Esc cancel"
+)
 ACCEPT_KEYS = (13, 10, ord("y"))  # Cocoa sends 13 for Return where other backends send 10
 
 
@@ -42,6 +45,14 @@ def _fit(image: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 def _open(title: str, image: np.ndarray) -> None:
+    """Show the window.
+
+    The title has to be ASCII: it reaches the OS title bar as bytes, and macOS renders
+    anything wider one byte at a time, so an em-dash arrives as three glyphs.
+    """
+    if not title.isascii():
+        raise ValueError(f"window title must be ASCII, got {title!r}")
+
     # AUTOSIZE keeps one window unit equal to one displayed pixel, which is what makes the
     # single scale factor above enough to map a click back to the image.
     cv2.namedWindow(title, cv2.WINDOW_AUTOSIZE)
@@ -135,10 +146,23 @@ class _Picking:
     hover: tuple[float, float] | None = None
 
     def undo(self) -> None:
-        """Drop the last point, and end any drag: its index may be the one just dropped."""
-        if self.points:
+        """Drop the point under the cursor, else the last one placed. Ends any drag: its
+        index may be the one just dropped.
+
+        Under the cursor first: in a detector's proposal the wrong point is rarely last.
+        """
+        at = _nearest(self.points, self.hover, GRAB_PX / self.scale) if self.hover else None
+
+        if at is not None:
+            self.points.pop(at)
+        elif self.points:
             self.points.pop()
 
+        self.dragging = None
+
+    def clear(self) -> None:
+        """Drop every point, and end any drag: its index is gone with them."""
+        self.points.clear()
         self.dragging = None
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, _param: object = None) -> None:
@@ -172,15 +196,27 @@ def pick_points(
     *,
     exact: int | None = None,
     max_points: int | None = None,
+    initial: list[tuple[float, float]] | None = None,
 ) -> list[tuple[float, float]] | None:
     """Collect clicked points, or ``None`` if the user cancelled.
+
+    ``initial`` seeds the set, which is how a detector's proposal is corrected: it arrives
+    as ordinary points, with the same drag, undo and confirm as hand-placed ones. It is
+    truncated to whichever of ``max_points`` and ``exact`` applies, so the picker never
+    opens holding more than it will accept.
 
     ``None`` and ``[]`` mean different things: an empty list is a real answer (a string
     where every shot missed the paper), and collapsing the two would ship an empty
     session as though it had been confirmed.
     """
     canvas, scale = _fit(image)
-    state = _Picking(scale=scale, max_points=max_points)
+    seeded = list(initial or [])
+
+    for cap in (max_points, exact):
+        if cap is not None:
+            seeded = seeded[:cap]
+
+    state = _Picking(scale=scale, max_points=max_points, points=seeded)
     points = state.points
 
     # Also on stderr because waitKey only sees keys while the cv2 window has focus, and a
@@ -229,6 +265,11 @@ def pick_points(
 
             if key in (ord("u"), ord("U")):
                 state.undo()
+
+            # Shift, not a bare c: this throws away a whole string, and it is worth one
+            # deliberate keystroke when a detector's proposal is not worth correcting.
+            if key == ord("C"):
+                state.clear()
     finally:
         _close(title)
 

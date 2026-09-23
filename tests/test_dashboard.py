@@ -5,13 +5,13 @@ scoring is persisted fails these too rather than only the ingest tests.
 """
 
 import re
+from datetime import date
 
 import pytest
-from fastapi import Response, status
-from sqlmodel import Session, select
-from tests.conftest import make_jpeg, make_payload
+from fastapi import status
+from tests.conftest import make_jpeg, make_payload, post_ingest
 
-from target_analyzer.api.endpoints.ingest import _ingest_onto_existing_image
+from ta_shared.payload import Hit, SessionMeta
 from target_analyzer.config import get_settings
 from target_analyzer.models import Image, Interpretation
 from target_analyzer.templating import format_metres
@@ -77,12 +77,16 @@ def test_the_session_svg_draws_a_ring_per_ring_and_a_marker_per_hole(
     auth_client, ingested, profile
 ):
     response = auth_client.get(f"/dashboard/session/{ingested['session_id']}")
+    # The legend beneath the drawing reuses the same classes for its swatches, so counting
+    # over the whole page would count those too.
+    drawing = response.text.split("</svg>")[0]
 
     assert response.status_code == status.HTTP_200_OK
     assert f'viewBox="0 0 {profile.canon_size_px} {profile.canon_size_px}"' in response.text
-    assert response.text.count('class="ring"') == profile.n_rings
+    assert drawing.count('class="ring"') == profile.n_rings
     # Both hits of the fixture payload sit inside the innermost ring.
-    assert response.text.count('class="hole-good"') == ingested["n_holes"]
+    assert drawing.count('class="hole-good"') == ingested["n_holes"]
+    assert response.text.count('class="legend"') == 1
 
 
 def test_the_session_page_prints_the_stored_bias_direction(auth_client, ingested, db_session):
@@ -124,16 +128,58 @@ def test_saving_notes_lands_back_at_the_notes_box_and_sticks(auth_client, ingest
     assert "sore from gym" in auth_client.get("/dashboard").text
 
 
-def test_the_compare_view_lists_every_reading_of_the_image(
-    auth_client, ingested, profile, db_session: Session
+def test_a_photo_nobody_confirmed_is_flagged_and_offers_no_filter(
+    auth_client, client, auth, ingested, png_bytes
 ):
-    """Driven below HTTP because ``method`` is a Literal on the wire, so a second
-    reading cannot arrive through the endpoint yet.
-    """
-    ship = make_payload(make_jpeg())
-    ship.method = "cv_blob"
-    image = db_session.exec(select(Image)).one()
-    _ingest_onto_existing_image(db_session, Response(), image, profile, ship)
+    unconfirmed = make_payload(
+        # A different size is a different sha, which is what makes this a second session
+        # rather than a second reading of the one `ingested` already put in.
+        make_jpeg(size=48),
+        method="cv_blob",
+        session=SessionMeta(
+            gun="Unconfirmed Only",
+            distance_m=50,
+            shot_at=date(2026, 8, 1),
+            target_profile="issf_precision",
+            target_profile_version=1,
+        ),
+    )
+    posted = post_ingest(client, auth, unconfirmed, png_bytes)
+
+    assert posted.status_code == status.HTTP_201_CREATED
+
+    page = auth_client.get(f"/dashboard/session/{posted.json()['session_id']}")
+    trend = auth_client.get("/dashboard")
+
+    assert "Nobody has confirmed this photo yet" in page.text
+    assert "Unconfirmed Only" not in trend.text
+
+
+def test_a_detector_reading_does_not_reach_the_trend(
+    auth_client, client, auth, ingested, png_bytes
+):
+    detected = make_payload(make_jpeg(), method="cv_blob", hits=[Hit(x_canon=900, y_canon=120)])
+
+    assert post_ingest(client, auth, detected, png_bytes).status_code == status.HTTP_201_CREATED
+
+    response = auth_client.get("/dashboard")
+
+    assert response.text.count(f'href="/dashboard/session/{ingested["session_id"]}"') == 1
+
+
+def test_the_compare_view_lists_every_reading_of_the_image(
+    auth_client, client, auth, ingested, png_bytes
+):
+    detected = make_payload(
+        make_jpeg(),
+        method="cv_blob",
+        # The tolerance is wider than the gap between the two hand-marked hits, so this
+        # first point is within it of both and the closer one takes it; the second is
+        # within it of neither.
+        hits=[Hit(x_canon=503, y_canon=500), Hit(x_canon=900, y_canon=120)],
+    )
+
+    assert post_ingest(client, auth, detected, png_bytes).status_code == status.HTTP_201_CREATED
 
     response = auth_client.get(f"/dashboard/compare/{ingested['image_id']}")
 
@@ -143,6 +189,13 @@ def test_the_compare_view_lists_every_reading_of_the_image(
     # The hand-marked reading is the baseline the others are read against, so it takes
     # the leftmost column rather than wherever its name happens to sort.
     assert response.text.index("manual") < response.text.index("cv_blob")
+    # And it is measured against that baseline, which is what says whether a detector is
+    # getting better rather than only what it drew.
+    assert "1 matched" in response.text
+    assert "1 missed" in response.text
+    assert "1 spurious" in response.text
+    # The legend is a key for the page, so two readings do not bring two copies of it.
+    assert response.text.count('class="legend"') == 1
 
 
 @pytest.mark.parametrize(
