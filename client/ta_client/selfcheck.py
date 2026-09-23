@@ -447,6 +447,8 @@ def selfcheck() -> None:
 
         return send
 
+    assert candidates, "the synthetic target must give the blob filter something to propose"
+
     verdicts = ["hole" if index % 2 == 0 else "not" for index in range(len(candidates))]
     kept = cv_blob_vlm.detect(target, pistol, settings=asked, send=judging(*verdicts))
     expected = [c for c, verdict in zip(candidates, verdicts, strict=True) if verdict == "hole"]
@@ -476,6 +478,18 @@ def selfcheck() -> None:
         raise AssertionError("a missing endpoint must be refused")
     except DetectorError as exc:
         assert "TA_VLM_BASE_URL" in str(exc), str(exc)
+
+    hedged = cv_blob_vlm.detect(
+        target, pistol, settings=asked, send=answering('{"answer": "uncertain"}')
+    )
+
+    assert len(hedged) == len(candidates), "an unreadable verdict keeps its candidate"
+
+    try:
+        cv_blob_vlm.crop(target, 10, 10, 50, pistol.canon_size_px)
+        raise AssertionError("an unpadded frame must be refused")
+    except ValueError as exc:
+        assert "padded" in str(exc), str(exc)
 
     # --- the printable sheet is to scale ---
     svg = render_svg(profile)

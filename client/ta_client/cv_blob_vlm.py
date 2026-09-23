@@ -18,6 +18,7 @@ it were a complete one.
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -35,6 +36,10 @@ CROP_HOLE_WIDTHS = 7.5
 # The side the crop is sent at. Vision encoders work at a few hundred pixels, so past this
 # the upscale is carrying no more information into the model.
 CROP_SEND_PX = 448
+# What one warm crop is allowed to cost. TA_VLM_TIMEOUT covers the cold load, which is
+# paid once, and this covers each candidate after it — without a whole-run budget a model
+# that answers slowly rather than failing holds the hole picker shut for an hour.
+WARM_SECONDS = 20.0
 
 PROMPT = """This is a close-up crop of a paper shooting target. Look at the object at the
 very centre of the image. Is it a bullet hole torn through the paper, or is it something
@@ -54,8 +59,17 @@ def check(settings: Settings | None, profile: TargetProfile) -> None:
     vlm.check(settings, profile)
 
 
-def crop(padded: np.ndarray, x: float, y: float, half: int) -> np.ndarray:
-    """One candidate's window, from a frame already padded by ``half`` on every side."""
+def crop(padded: np.ndarray, x: float, y: float, half: int, canon: int) -> np.ndarray:
+    """One candidate's window, from a canonical frame padded by ``half`` on every side.
+
+    The padding is checked rather than assumed: handed the unpadded frame this would
+    still slice successfully, and every window would be centred half a crop away.
+    """
+    side = canon + 2 * half
+
+    if padded.shape[:2] != (side, side):
+        raise ValueError(f"expected a frame padded to {side}x{side}, got {padded.shape[:2]}")
+
     left, top = round(x), round(y)
 
     return padded[top : top + 2 * half, left : left + 2 * half]
@@ -87,24 +101,44 @@ def detect(
     ``VlmError`` when the model cannot be reached or does not answer with a verdict.
     """
     settings = settings or get_settings()
-    check(settings, profile)
+    cv_blob.check(settings, profile)
+    # Before the endpoint is checked, so a frame that is not the canonical square raises
+    # ValueError here rather than being reported as a configuration problem.
     candidates = cv_blob.detect(normalized, profile)
+    vlm.check(settings, profile)
+    canon = profile.canon_size_px
     half = round(CROP_HOLE_WIDTHS * cv_blob.DEFAULT_HOLE_DIAM_MM / mm_per_px(profile) / 2)
     # Replicated rather than black: a candidate near the paper's edge stays in the middle
     # of its crop, where the prompt says it is, instead of against a border it invented.
     padded = cv2.copyMakeBorder(normalized, half, half, half, half, cv2.BORDER_REPLICATE)
-    kept = []
+    deadline = time.monotonic() + settings.vlm_timeout + WARM_SECONDS * len(candidates)
+    kept, unreadable = [], 0
 
     with vlm.client_for(settings) as client:
-        for candidate in candidates:
-            window = crop(padded, candidate.x_canon, candidate.y_canon, half)
+        for index, candidate in enumerate(candidates):
+            if time.monotonic() > deadline:
+                raise vlm.VlmError(
+                    f"gave up after {index} of {len(candidates)} candidates: the model is "
+                    "answering, but too slowly to finish this photo"
+                )
+
+            window = crop(padded, candidate.x_canon, candidate.y_canon, half, canon)
             image = cv2.resize(window, (CROP_SEND_PX, CROP_SEND_PX), interpolation=cv2.INTER_CUBIC)
             answer = vlm.ask(client, vlm.encode(image), PROMPT, settings, send)
 
-            if verdict(answer):
+            # Kept rather than dropped, and unlike an unreachable model this does not end
+            # the reading: one hedged verdict costs a proposal to delete, where failing
+            # here would discard every candidate already judged.
+            try:
+                accepted = verdict(answer)
+            except vlm.VlmError:
+                accepted, unreadable = True, unreadable + 1
+
+            if accepted:
                 kept.append(candidate)
 
-    print(f"cv_blob_vlm: kept {len(kept)} of {len(candidates)} proposals", file=sys.stderr)
+    note = f", {unreadable} unreadable and kept" if unreadable else ""
+    print(f"cv_blob_vlm: kept {len(kept)} of {len(candidates)} proposals{note}", file=sys.stderr)
 
     return kept[:MAX_HITS]
 

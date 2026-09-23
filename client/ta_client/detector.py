@@ -51,7 +51,14 @@ def load_session(session: Path, profile: Path | None) -> tuple[dict, TargetProfi
         raise SystemExit(f"no payload.json in {session}")
 
     payload = json.loads(marked.read_text(encoding="utf-8"))
-    path = profile or PROFILES / f"{payload['session']['target_profile']}.json"
+    name = payload["session"]["target_profile"]
+
+    # A session folder can be written by another machine, and the payload names its own
+    # profile — so the name selects a file in PROFILES rather than reaching anywhere.
+    if Path(name).name != name:
+        raise SystemExit(f"{name!r} is not a profile name")
+
+    path = profile or PROFILES / f"{name}.json"
 
     if not path.is_file():
         raise SystemExit(f"no profile at {path} — pass --profile")

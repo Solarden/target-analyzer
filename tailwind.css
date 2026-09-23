@@ -131,6 +131,11 @@
   .panel-narrow {
     @apply mx-auto mt-10 max-w-[360px];
   }
+  /* Scoped rather than set on `input`, so the dashboard's inline filters keep their own
+   * width. */
+  .panel-narrow input {
+    @apply w-full;
+  }
   .muted {
     @apply text-muted;
   }
@@ -201,10 +206,12 @@
     @apply m-0 tabular-nums;
   }
 
+  /* auto-FILL, not auto-fit: a reading left alone on the last row keeps one column's
+   * width instead of stretching across the whole grid. */
   .compare {
-    @apply flex flex-wrap gap-4;
+    @apply grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4;
   }
   .compare > .panel {
-    @apply min-w-[280px] flex-1;
+    @apply min-w-0;
   }
 }
