@@ -25,11 +25,8 @@ import numpy as np
 from ta_client.config import Settings
 from ta_client.detector import DetectorError, load_session, report
 from ta_shared.payload import MAX_HITS, Hit
-from ta_shared.profile import TargetProfile, mm_per_px
+from ta_shared.profile import HOLE_DIAM_MM, TargetProfile, mm_per_px
 
-# 5.6 mm is the smallest calibre this is used with, and a LoG tuned small still answers a
-# larger hole — the other way round it splits one hole into an annulus of weak peaks.
-DEFAULT_HOLE_DIAM_MM = 5.6
 # Of the strongest response in the frame, so the cut travels with the exposure rather
 # than with an absolute grey level. Leaning high: a proposal a person has to delete costs
 # more of their attention than one they have to add.
@@ -60,7 +57,7 @@ def check(_settings: Settings | None, profile: TargetProfile) -> None:
 def detect(
     normalized: np.ndarray,
     profile: TargetProfile,
-    hole_diam_mm: float = DEFAULT_HOLE_DIAM_MM,
+    hole_diam_mm: float = HOLE_DIAM_MM,
 ) -> list[Hit]:
     """Propose holes in a canonical-frame image, strongest first.
 
@@ -124,7 +121,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "session", type=Path, help="a session folder: payload.json + normalized.png"
     )
-    parser.add_argument("--hole-mm", type=float, default=DEFAULT_HOLE_DIAM_MM, metavar="MM")
+    parser.add_argument("--hole-mm", type=float, default=HOLE_DIAM_MM, metavar="MM")
     parser.add_argument(
         "--profile", type=Path, default=None, help="path to the target profile JSON"
     )

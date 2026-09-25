@@ -42,6 +42,11 @@ class RingGeometry(Protocol):
     target_diam_mm: float | None
 
 
+# The smallest calibre this project is used with: a LoG tuned small still answers a larger
+# hole, and a box drawn small still sits on one.
+HOLE_DIAM_MM = 5.6
+
+
 def mm_per_px(profile: RingGeometry) -> float | None:
     """Millimetres per canonical pixel, or None when the profile has no physical
     diameter — then only px metrics are reported.
@@ -54,6 +59,20 @@ def mm_per_px(profile: RingGeometry) -> float | None:
         return None
 
     return profile.target_diam_mm / (2 * profile.ring_radii_px[-1])
+
+
+def hole_diam_px(profile: RingGeometry) -> float:
+    """A bullet hole's diameter in canonical pixels.
+
+    Raises ``ValueError`` when the profile carries no physical scale, because a hole then
+    has no size to report.
+    """
+    scale = mm_per_px(profile)
+
+    if scale is None:
+        raise ValueError("the profile has no target_diam_mm, so a hole has no size in pixels")
+
+    return HOLE_DIAM_MM / scale
 
 
 class MarkerBoard(BaseModel):

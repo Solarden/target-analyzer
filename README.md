@@ -49,6 +49,8 @@ docker compose -f docker-compose.test.yml up -d --wait   # throwaway Postgres fo
 uv run pytest
 ```
 
+- `uv sync --extra yolo` is separate and optional: it pulls torch to train and run the
+  custom detector, and nothing in the manual or classic-CV path needs it.
 - Dev database is SQLite (zero setup); production is Postgres.
   The DB-backed tests run against a throwaway Postgres for dialect parity — set
   `TA_TEST_DATABASE_URL` to a SQLite URL for a docker-less run.
@@ -65,6 +67,7 @@ uv run python -m target_analyzer.seed_profile profiles/issf_precision.json
 uv run python -m target_analyzer.create_token   # token -> the Mac, hash -> TA_INGEST_TOKEN_HASH
 uv run python -m target_analyzer.create_user --username alice --name "Alice"
 uv run uvicorn target_analyzer.main:app --reload
+uv run python -m target_analyzer.export_corpus corpus/sessions   # every marked reading, as session folders
 ```
 
 Over plain http, set `TA_SECURE_COOKIES=false` first. The session cookie is marked Secure
@@ -103,6 +106,8 @@ uv run python -m ta_client.ship          # drain the outbox without processing a
 uv run python -m ta_client.cv_blob out/<session>   # score the blob detector against a marked session
 uv run python -m ta_client.vlm out/<session>       # same, for the vision model
 uv run python -m ta_client.cv_blob_vlm out/<session>  # same, for the two together
+uv run python -m ta_client.yolo out/<session>      # same, for the trained model
+uv run python -m ta_client.yolo_data corpus/sessions/* --out corpus/yolo --profile profiles/issf_pistol_50m.json
 ```
 
 The client reads its settings from `~/.config/target-analyzer/env` — never from the
@@ -117,6 +122,11 @@ TA_SHIP_ORIGINAL=true
 TA_VLM_BASE_URL=https://vision.example.com/v1
 TA_VLM_MODEL=the-model-tag
 TA_VLM_API_KEY=only-if-the-endpoint-wants-one
+
+# Only for the trained detector, and only with `uv sync --extra yolo` installed.
+TA_YOLO_WEIGHTS=/path/to/the-model.pt
+TA_YOLO_DEVICE=          # blank lets the runtime choose
+TA_YOLO_CONF=0.10
 ```
 
 `chmod 600` that file: it holds the bearer token. With `TA_SERVER_URL` unset the client
@@ -124,9 +134,12 @@ still processes photos and leaves them queued.
 
 Print `board.svg` at 100% — it is in millimetres, and the calibration line on it must
 measure 50 mm with a ruler, or the rings on paper will not match the profile the server
-scores against. Photograph the target so the whole sheet is in frame, then run the
-pipeline: it warps the photo into the canonical frame, asks you to confirm the rings
-landed on the printed ones, and lets you click the holes. The session then goes to the
+scores against. Photograph the target from as close as you can while keeping the whole
+sheet in frame — walk up to it rather than shooting from the firing line. The warp makes
+every photo the same 1500 px square, but it cannot invent detail the camera never caught,
+and a hole is a few millimetres across. Then run the pipeline: it warps the photo into
+the canonical frame, asks you to confirm the rings landed on the printed ones, and lets
+you click the holes. The session then goes to the
 server; if the server is unreachable it stays in the outbox
 (`~/.target-analyzer/outbox/`, overridable with `--outbox`) and the next run sends it,
 oldest first. Ingest is idempotent on the photo's sha256, so a replayed flush never
@@ -143,6 +156,13 @@ them: the blob filter proposes, the model is shown a close crop of each proposal
 whether it is really a hole, and the survivors keep the blob filter's coordinates. It costs
 one model call per proposal rather than one per photo, so it is the slowest method by some
 way.
+
+`--method yolo` runs a model trained on this project's own photos. It needs
+`uv sync --extra yolo` and `TA_YOLO_WEIGHTS` pointing at a trained model — there is none in
+the repo, and `ta_client.yolo_data` is what builds a dataset from marked sessions and
+prints the command that trains one. It reads the frame in 100 mm tiles rather than whole:
+a hole is thirteen pixels in a 1500 px square, and a detector that resizes the square to
+its own input sees five.
 
 Both readings are then sent — the detector's untouched one and yours — and the dashboard's
 Compare view puts them side by side with the difference between them counted. Expect to

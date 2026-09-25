@@ -8,7 +8,7 @@ deployment detail in a public file.
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_FILE = Path.home() / ".config" / "target-analyzer" / "env"
@@ -40,6 +40,21 @@ class Settings(BaseSettings):
     # A model that is not already resident costs most of a minute to load before it reads
     # anything, so this is a first-call budget rather than a per-image one.
     vlm_timeout: float = 180.0
+
+    # Where a trained model lives. Unset or blank is the off switch, like server_url.
+    yolo_weights: Path | None = None
+    # Blank lets the runtime pick: it knows what this machine has, and a setting nobody
+    # re-checks does not.
+    yolo_device: str = ""
+    # The precision/recall knob, and it belongs to the weights rather than the project:
+    # choose it per model, on a photo that model was neither trained nor selected on.
+    yolo_conf: float = 0.10
+
+    # A blank path is Path("."), the current directory — which reads as configured.
+    @field_validator("yolo_weights", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 @lru_cache

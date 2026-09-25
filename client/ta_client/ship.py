@@ -31,6 +31,9 @@ NAME = re.compile(r"\d+-[0-9a-f]{12}(-[a-z0-9_]+)?")
 # 409 is a success here: the server already holds the photo, so the folder is finished.
 # is_success and raise_for_status() disagree, and would stall the outbox on every replay.
 DONE = (201, 409)
+# Refused for what is in the folder, so it can never succeed and must not hold back the
+# folders queued behind it. Any other 4xx is about the token or the URL, which no folder fixes.
+REFUSED = (400, 413, 415, 422)
 # Separate from the upload timeout, so an unreachable server costs five seconds per
 # folder rather than sixty.
 CONNECT_TIMEOUT = 5.0
@@ -99,17 +102,24 @@ def _parts(folder: Path) -> _Parts:
     return _Parts(int(epoch), photo, method[0] if method else GROUND_TRUTH_METHOD)
 
 
-def _order(folder: Path) -> tuple[int, bool]:
-    """Oldest first, then the ground truth ahead of a detector sharing its second.
+def _order(folder: Path, truth: dict[str, int] | None = None) -> tuple[int, bool]:
+    """Oldest first, and no detector reading ahead of its photo's ground truth.
 
     The epoch sorts as an integer: it is unpadded, so "10-" must not land before "2-".
 
-    One run enqueues both readings of a photo, and a detector's reading alone on the
-    server is a session scored by nobody.
+    ``truth`` maps a photo to its queued ground truth's epoch. Only that reading carries
+    the original, and the server stores no original for a photo it already holds — so a
+    detector reading that reaches it first loses the photo for good.
+    Sharing a second is the common case; a photo re-marked before it ever shipped is the
+    other, because superseding the older ground truth leaves its detector reading oldest.
     """
     parts = _parts(folder)
+    epoch = parts.epoch
 
-    return parts.epoch, parts.method != GROUND_TRUTH_METHOD
+    if parts.method != GROUND_TRUTH_METHOD and truth:
+        epoch = max(epoch, truth.get(parts.photo, epoch))
+
+    return epoch, parts.method != GROUND_TRUTH_METHOD
 
 
 def pending(outbox: Path) -> list[Path]:
@@ -133,7 +143,38 @@ def pending(outbox: Path) -> list[Path]:
             print(f"{folder.name}: superseded by a later reading of the same photo")
             shutil.rmtree(folder)
 
-    return [p for p in folders if p in keep]
+    survivors = [p for p in folders if p in keep]
+    truth = {
+        _parts(p).photo: _parts(p).epoch
+        for p in survivors
+        if _parts(p).method == GROUND_TRUTH_METHOD
+    }
+
+    return sorted(survivors, key=lambda p: _order(p, truth))
+
+
+def failed(outbox: Path) -> list[Path]:
+    """What the drain set aside, and so what has not reached the server."""
+    held = outbox / "failed"
+
+    return sorted(p for p in held.iterdir() if p.is_dir()) if held.is_dir() else []
+
+
+def _set_aside(folder: Path, why: str) -> None:
+    """Move a folder the drain must not send into failed/, where pending() never looks."""
+    held = folder.parent / "failed"
+    destination = held / folder.name
+
+    # A reading of that name is already there and may differ from this one, so neither is
+    # overwritten: this one stays queued, where the drain now steps over it.
+    if destination.exists():
+        print(f"{folder.name}: {why}; failed/ already holds one of that name", file=sys.stderr)
+
+        return
+
+    held.mkdir(exist_ok=True)
+    shutil.move(folder, destination)
+    print(f"{folder.name}: {why}, set aside in {held}", file=sys.stderr)
 
 
 def build_request(folder: Path, settings: Settings) -> httpx2.Request:
@@ -178,8 +219,17 @@ def flush(outbox: Path, *, settings: Settings | None = None, send: Sender = post
 
 
 def _drain(client: httpx2.Client, folders: list[Path], settings: Settings, send: Sender) -> int:
+    # Photos whose ground truth was refused. Their detector readings must not overtake it
+    # (see _order), so they go aside with it and come back together.
+    orphaned: set[str] = set()
+
     for index, folder in enumerate(folders):
         remaining = len(folders) - index
+        parts = _parts(folder)
+
+        if parts.photo in orphaned:
+            _set_aside(folder, "held back with its photo's refused ground truth")
+            continue
 
         try:
             response = send(client, folder, settings)
@@ -212,11 +262,17 @@ def _drain(client: httpx2.Client, folders: list[Path], settings: Settings, send:
 
             return remaining
 
-        # ponytail: a folder the server will never accept blocks everything behind it. A
-        # failed/ quarantine dir is the upgrade if that ever happens twice.
+        if response.status_code in REFUSED:
+            _set_aside(folder, f"refused with {response.status_code} ({response.text[:300]})")
+
+            if parts.method == GROUND_TRUTH_METHOD:
+                orphaned.add(parts.photo)
+
+            continue
+
         raise ShipError(
-            f"{folder} was refused with {response.status_code}: {response.text[:500]}\n"
-            "Shipping stops here — fix the cause, or delete that folder to unblock the rest."
+            f"{settings.server_url} answered {response.status_code}: {response.text[:500]}\n"
+            "That is about the server or the token, not this folder — the outbox is fine."
         )
 
     return 0
@@ -241,7 +297,21 @@ def main(argv: list[str]) -> int:
 
         return 1
 
-    print(f"{queued} queued" if queued else "outbox empty")
+    held = failed(args.outbox)
+
+    if queued:
+        print(f"{queued} queued")
+    elif not held:
+        print("outbox empty")
+
+    if held:
+        print(
+            f"{len(held)} set aside in {args.outbox / 'failed'}, not sent — fix each one and "
+            "move it back into the outbox",
+            file=sys.stderr,
+        )
+
+        return 1
 
     return 0
 
