@@ -65,6 +65,9 @@ jobs:
 
       - run: uv run pytest
 
+      # Postgres, as in production. After pytest, which leaves the database empty.
+      - run: ALEMBIC_CHECK_DATABASE_URL="$TA_TEST_DATABASE_URL" scripts/alembic_check.sh
+
       # Fail if the models drifted from the migrations (the pre-commit hook, in CI).
       - run: scripts/alembic_check.sh
 

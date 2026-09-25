@@ -15,6 +15,10 @@ updates:
       python-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # Held below 0.0.45 in pyproject.toml until the timezone-aware datetime migration.
+      - dependency-name: "sqlmodel"
+        versions: [">=0.0.45"]
 
   # The CI workflow's own actions.
   - package-ecosystem: "github-actions"
@@ -23,5 +27,3 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "ci"
-
-  # Add "docker" once the P6 deploy Dockerfile lands (mirrors EA).

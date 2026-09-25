@@ -16,21 +16,28 @@ repos:
         args: [--branch, main]
       - id: detect-private-key
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.15
+  # Run from the lock rather than pinned here, so the hook and CI run one version: two
+  # formatters undo each other forever.
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix, --show-fixes, --exit-non-zero-on-fix]
+        name: ruff
+        entry: uv run --extra dev ruff check --force-exclude --fix --show-fixes --exit-non-zero-on-fix
+        language: system
+        types_or: [python, pyi, jupyter]
+        require_serial: true
       - id: ruff-format
-
-  # Keep rev in step with the djlint floor in pyproject.toml: two versions of a
-  # formatter reformat the same file differently and undo each other forever.
-  - repo: https://github.com/djlint/djLint
-    rev: v1.46.1
-    hooks:
-      # Not djlint-reformat-jinja: that one is types_or:[jinja], which identify gives to
-      # .jinja/.j2 — these templates are .html. The profile comes from pyproject.toml.
+        name: ruff format
+        entry: uv run --extra dev ruff format --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter]
+        require_serial: true
+      # The profile comes from pyproject.toml.
       - id: djlint-reformat
+        name: djLint formatting
+        entry: uv run --extra dev djlint --reformat
+        language: system
+        types_or: [html]
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.8.6
