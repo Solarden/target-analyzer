@@ -319,6 +319,7 @@ def _ingest_new_image(
             distance_m=ship.session.distance_m,
             notes=ship.session.notes,
             shot_at=ship.session.shot_at,
+            shooter=ship.session.shooter,
         )
         session.add(shooting_session)
         session.flush()

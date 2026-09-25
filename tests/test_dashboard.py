@@ -4,6 +4,7 @@ Everything here reads a session put in by the real ingest path, so a change to h
 scoring is persisted fails these too rather than only the ingest tests.
 """
 
+import json
 import re
 from datetime import date
 
@@ -237,3 +238,87 @@ def test_a_non_integer_image_id_never_reaches_the_handler(auth_client, ingested,
     response = auth_client.get(f"/dashboard/image/{image_id}")
 
     assert response.status_code != status.HTTP_200_OK
+
+
+def _shot_by(client, auth, png_bytes, shooter, *, size, day, method="manual"):
+    """A session of its own, shot by ``shooter``; its id."""
+    session = SessionMeta(
+        gun="CZ 75",
+        distance_m=25,
+        shot_at=date(2026, 9, day),
+        shooter=shooter,
+        target_profile="issf_precision",
+        target_profile_version=1,
+    )
+    payload = make_payload(make_jpeg(size=size), method=method, session=session)
+    response = post_ingest(client, auth, payload, png_bytes)
+
+    assert response.status_code == status.HTTP_201_CREATED
+
+    return response.json()["session_id"]
+
+
+def _chart(page: str) -> dict:
+    island = re.search(r'<script id="trend-data" type="application/json">(.*?)</script>', page)
+
+    return json.loads(island.group(1))
+
+
+@pytest.fixture
+def two_shooters(client, auth, profile, png_bytes) -> dict[str, int]:
+    return {
+        "you": _shot_by(client, auth, png_bytes, None, size=40, day=1),
+        "tata": _shot_by(client, auth, png_bytes, "Tata", size=41, day=2),
+    }
+
+
+@pytest.mark.parametrize(
+    ("query", "listed"),
+    [
+        ("", {"you", "tata"}),
+        ("?shooter=-", {"you"}),
+        ("?shooter=Tata", {"tata"}),
+        ("?shooter=Nobody", set()),
+    ],
+)
+def test_the_trend_filters_by_shooter(auth_client, two_shooters, query, listed):
+    page = auth_client.get(f"/dashboard{query}").text
+    shown = {who for who, sid in two_shooters.items() if f'href="/dashboard/session/{sid}"' in page}
+
+    assert shown == listed
+
+
+def test_the_chart_draws_one_line_per_shooter_with_gaps_for_the_others(auth_client, two_shooters):
+    chart = _chart(auth_client.get("/dashboard?metric=mean_radius_mm").text)
+    you, tata = chart["series"]
+
+    assert chart["title"] == "Mean radius (mm)"
+    assert (you["label"], tata["label"]) == ("You", "Tata")
+    assert you["data"][1] is None and tata["data"][0] is None
+    assert you["data"][0] is not None and tata["data"][1] is not None
+
+
+def test_a_shooter_keeps_one_colour_under_every_filter(auth_client, two_shooters):
+    (alone,) = _chart(auth_client.get("/dashboard?shooter=Tata").text)["series"]
+    _, together = _chart(auth_client.get("/dashboard").text)["series"]
+
+    assert alone["colour"] == together["colour"] == 1
+
+
+def test_an_unknown_metric_charts_the_score(auth_client, two_shooters):
+    assert _chart(auth_client.get("/dashboard?metric=nonsense").text)["title"] == "Total score"
+
+
+def test_the_shooter_filter_waits_for_a_second_shooter(
+    auth_client, client, auth, png_bytes, ingested
+):
+    assert 'id="shooter"' not in auth_client.get("/dashboard").text
+
+    # Someone whose only reading is a detector's has no line to show, so no option either.
+    _shot_by(client, auth, png_bytes, "Tata", size=41, day=2, method="cv_blob")
+
+    assert 'id="shooter"' not in auth_client.get("/dashboard").text
+
+    _shot_by(client, auth, png_bytes, "Tata", size=42, day=3)
+
+    assert 'id="shooter"' in auth_client.get("/dashboard").text

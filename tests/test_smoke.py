@@ -1,13 +1,12 @@
 """P0 smoke check: the packages are wired and the shared contract round-trips."""
 
-from datetime import date
-
 import pytest
 from pydantic import ValidationError
 
 import ta_shared
 import target_analyzer
 from ta_shared.payload import Hit, SessionMeta, ShipPayload
+from tests.conftest import make_jpeg, make_payload
 
 
 def test_packages_import():
@@ -16,20 +15,30 @@ def test_packages_import():
 
 
 def test_ship_payload_roundtrips():
-    payload = ShipPayload(
-        image_sha256="0" * 64,
-        canon_size_px=1000,
-        session=SessionMeta(
-            gun="test",
-            distance_m=10,
-            shot_at=date(2026, 7, 24),
-            target_profile="issf_precision",
-            target_profile_version=1,
-        ),
-        hits=[Hit(x_canon=500, y_canon=500)],
-    )
+    payload = make_payload(make_jpeg())
 
     assert ShipPayload.model_validate_json(payload.model_dump_json()) == payload
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param((), id="payload"),
+        pytest.param(("session",), id="session"),
+        pytest.param(("hits", 0), id="hit"),
+    ],
+)
+def test_an_unknown_field_is_refused_at_every_level(path):
+    data = make_payload(make_jpeg()).model_dump(mode="json")
+    node = data
+
+    for key in path:
+        node = node[key]
+
+    node["lane"] = 7
+
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ShipPayload.model_validate(data)
 
 
 @pytest.mark.parametrize("coordinate", [float("inf"), float("-inf"), float("nan")])
@@ -110,3 +119,20 @@ def test_ship_payload_bounds(field, value):
 
     with pytest.raises(ValidationError):
         ShipPayload(**(fields | {field: value}))
+
+
+SESSION = {"gun": "g", "distance_m": 10, "target_profile": "p", "target_profile_version": 1}
+
+
+@pytest.mark.parametrize(
+    ("typed", "stored"),
+    [(None, None), ("Tata", "Tata"), ("  Tata ", "Tata"), ("   ", None), ("Zażółć", "Zażółć")],
+)
+def test_a_shooter_is_stored_as_typed_and_blank_is_the_owner(typed, stored):
+    assert SessionMeta(**SESSION, shooter=typed).shooter == stored
+
+
+@pytest.mark.parametrize("typed", ["-", " - ", "x" * 101])
+def test_a_shooter_needs_a_letter_or_digit_and_a_bounded_length(typed):
+    with pytest.raises(ValidationError):
+        SessionMeta(**SESSION, shooter=typed)

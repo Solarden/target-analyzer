@@ -6,10 +6,17 @@ from ta_shared.payload import GROUND_TRUTH_METHOD
 from target_analyzer.models import Image, Interpretation, ShootingSession
 
 TrendRow = tuple[Interpretation, ShootingSession]
+# The owner's value in the shooter filter. SessionMeta refuses a name without a letter or
+# digit, so no shooter can be called this.
+OWNER = "-"
 
 
 def rows(
-    session: Session, *, gun: str | None = None, distance_m: float | None = None
+    session: Session,
+    *,
+    gun: str | None = None,
+    distance_m: float | None = None,
+    shooter: str | None = None,
 ) -> list[TrendRow]:
     """Every hand-marked reading with the session it belongs to, oldest first.
 
@@ -42,6 +49,11 @@ def rows(
     if distance_m is not None:
         statement = statement.where(ShootingSession.distance_m == distance_m)
 
+    if shooter == OWNER:
+        statement = statement.where(col(ShootingSession.shooter).is_(None))
+    elif shooter:
+        statement = statement.where(ShootingSession.shooter == shooter)
+
     return list(session.exec(statement).all())
 
 
@@ -73,6 +85,17 @@ def distances(session: Session) -> list[float]:
         select(distinct(col(ShootingSession.distance_m)))
         .where(col(ShootingSession.id).in_(_scored_sessions()))
         .order_by(col(ShootingSession.distance_m))
+    )
+
+    return list(session.exec(statement).all())
+
+
+def shooters(session: Session) -> list[str | None]:
+    """Everyone with a scored session, the owner (``None``) first."""
+    statement = (
+        select(distinct(col(ShootingSession.shooter)))
+        .where(col(ShootingSession.id).in_(_scored_sessions()))
+        .order_by(col(ShootingSession.shooter).nulls_first())
     )
 
     return list(session.exec(statement).all())

@@ -149,6 +149,11 @@ session then goes to the server; if the server is unreachable it stays in the ou
 oldest first. Ingest is idempotent on the photo's sha256, so a replayed flush never
 creates a second session.
 
+`--shooter NAME` records a string someone else shot — a name, not an account; leave it
+off for your own. Once there is more than one shooter, Trend filters by them and draws one
+line per shooter for whichever metric the chart is set to. A name is stored as typed, so
+keep one spelling per person, or they appear twice.
+
 `--method cv_blob` runs the blob detector first and opens the hole picker on what it
 found, to drag, delete or add to.
 

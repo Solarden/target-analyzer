@@ -14,7 +14,6 @@ is a proposal, and nothing should train or measure against one.
 
 import shutil
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -23,15 +22,6 @@ from ta_shared.payload import GROUND_TRUTH_METHOD, Hit, SessionMeta, ShipPayload
 from target_analyzer.config import get_settings
 from target_analyzer.db import get_engine
 from target_analyzer.models import Hole, Image, Interpretation, ShootingSession, TargetProfile
-
-
-def _utc(moment: datetime) -> datetime:
-    """A stored instant, with the zone it was written in put back.
-
-    Everything persisted here is UTC, but neither backend stores the offset, so a value
-    read back is naive — and a naive datetime reports its epoch as if it were local time.
-    """
-    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
 
 def export(session: Session, base: Path, dest: Path) -> int:
@@ -76,6 +66,7 @@ def export(session: Session, base: Path, dest: Path) -> int:
                 distance_m=shooting.distance_m,
                 notes=shooting.notes,
                 shot_at=shooting.shot_at,
+                shooter=shooting.shooter,
                 target_profile=profile.name,
                 target_profile_version=profile.version,
             ),
@@ -83,9 +74,9 @@ def export(session: Session, base: Path, dest: Path) -> int:
                 Hit(x_canon=h.x_canon, y_canon=h.y_canon, confidence=h.confidence)
                 for h in holes.get(interpretation.id, [])
             ],
-            created_at=_utc(interpretation.created_at),
+            created_at=interpretation.created_at,
         )
-        epoch = int(_utc(image.uploaded_at).timestamp())
+        epoch = int(image.uploaded_at.timestamp())
         folder = dest / f"{epoch}-{image.sha256[:12]}-{GROUND_TRUTH_METHOD}"
         folder.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, folder / "normalized.png")

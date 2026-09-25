@@ -62,6 +62,10 @@ def ring_class(ring: int, n_rings: int) -> str:
     return "hole-poor"
 
 
+def format_shooter(value: str | None) -> str:
+    return value or "You"
+
+
 def format_day(value: date | datetime | None) -> str:
     if value is None:
         return "—"
@@ -73,6 +77,7 @@ templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 templates.env.filters["mm"] = format_mm
 templates.env.filters["num"] = format_number
 templates.env.filters["day"] = format_day
+templates.env.filters["shooter"] = format_shooter
 templates.env.filters["m"] = format_metres
 templates.env.filters["ring_class"] = ring_class
 # Reachable from every template without threading it through each handler: the
