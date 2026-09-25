@@ -17,6 +17,22 @@
                 {% if distance | string == f_distance %}selected{% endif %}>{{ distance | m }} m</option>
       {% endfor %}
     </select>
+    {% if shooters | length > 1 %}
+      <label for="shooter">Shooter</label>
+      <select id="shooter" name="shooter" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for shooter in shooters %}
+          {% set value = shooter or owner %}
+          <option value="{{ value }}" {% if value == f_shooter %}selected{% endif %}>{{ shooter | shooter }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+    <label for="metric">Chart</label>
+    <select id="metric" name="metric" onchange="this.form.submit()">
+      {% for key, title in metrics.items() %}
+        <option value="{{ key }}" {% if key == f_metric %}selected{% endif %}>{{ title }}</option>
+      {% endfor %}
+    </select>
     <noscript>
       <button type="submit">Apply</button>
     </noscript>
@@ -29,6 +45,7 @@
       <thead>
         <tr>
           <th>Shot</th>
+          {% if shooters | length > 1 %}<th>Shooter</th>{% endif %}
           <th>Gun</th>
           <th>Distance</th>
           <th>Holes</th>
@@ -45,6 +62,7 @@
             <td>
               <a href="/dashboard/session/{{ session.id }}">{{ (session.shot_at or interpretation.created_at) | day }}</a>
             </td>
+            {% if shooters | length > 1 %}<td>{{ session.shooter | shooter }}</td>{% endif %}
             <td>{{ session.gun }}</td>
             <td>{{ session.distance_m | m }} m</td>
             <td>{{ interpretation.n_holes }}</td>
@@ -62,7 +80,7 @@
     <script src="/static/chart-theme.js"></script>
     <script src="/static/trend.js"></script>
   {% else %}
-    {% if f_gun or f_distance %}
+    {% if f_gun or f_distance or f_shooter %}
       <p class="muted">No sessions match these filters.</p>
     {% else %}
       <p class="muted">No sessions yet. Ship one from the Mac client and it lands here.</p>

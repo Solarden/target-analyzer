@@ -5,6 +5,7 @@
   <h2>{{ session.gun }} — {{ session.distance_m | m }} m</h2>
   <p class="muted">
     Shot {{ (session.shot_at or session.created_at) | day }}
+    {% if session.shooter %}by {{ session.shooter }}{% endif %}
     {% if show_photo %}
       · <a href="?photo=off">hide photo</a>
     {% else %}

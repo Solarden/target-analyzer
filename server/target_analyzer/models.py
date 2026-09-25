@@ -28,13 +28,9 @@ from sqlmodel import JSON, Field, SQLModel
 def utc_now() -> datetime:
     """Current instant as a timezone-aware UTC datetime.
 
-    Everything persisted is UTC; localizing is a presentation concern.
-
-    Note the asymmetry: the timestamp columns are plain ``DateTime``, so the offset
-    is dropped on write and a row reads back **naive** — on both dialects, which is
-    the point (``timezone=True`` would hand back aware datetimes on Postgres and
-    naive ones on SQLite, so dev and prod would diverge). Compare a stored timestamp
-    against ``utc_now().replace(tzinfo=None)``, never against ``utc_now()`` itself.
+    Everything persisted is UTC; localizing is a presentation concern. Every timestamp
+    column is sqlmodel's ``UTCDateTime``, which refuses a naive value on write and reads
+    back aware on both dialects, so a stored timestamp compares against this directly.
     """
     return datetime.now(UTC)
 
@@ -104,6 +100,8 @@ class ShootingSession(SQLModel, table=True):
     distance_m: float
     notes: str = Field(default="")
     shot_at: date | None = Field(default=None)  # the shooting day, user-entered (EXIF is stripped)
+    # Who shot it, as typed on the Mac; NULL is the owner.
+    shooter: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=utc_now)
 
 

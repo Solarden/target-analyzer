@@ -4,10 +4,11 @@ Keeping these in one importable package means the two sides can never drift on
 the shape of what crosses the network. See implementation.md §3.
 """
 
+import re
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Blast radius, not realism: every hit becomes a row inserted in one transaction.
 MAX_HITS = 200
@@ -40,8 +41,24 @@ class SessionMeta(_Wire):
     distance_m: float = Field(gt=0, allow_inf_nan=False)
     notes: str = Field(default="", max_length=10_000)
     shot_at: date | None = None  # the shooting day; EXIF is stripped, so it can't be derived
+    # Who shot it, when not the owner: a name, not an account.
+    shooter: str | None = Field(default=None, max_length=100)
     target_profile: str = Field(max_length=100)
     target_profile_version: int = Field(ge=1)
+
+    # Stripped, and blank is the owner: "Tata " and "Tata" would otherwise be two people.
+    @field_validator("shooter", mode="before")
+    @classmethod
+    def _stripped(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+
+        value = value.strip()
+
+        if value and not re.search(r"\w", value):
+            raise ValueError("a name needs at least one letter or digit")
+
+        return value or None
 
 
 class ShipPayload(_Wire):

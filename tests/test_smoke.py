@@ -35,7 +35,7 @@ def test_an_unknown_field_is_refused_at_every_level(path):
     for key in path:
         node = node[key]
 
-    node["shooter"] = "Tata"
+    node["lane"] = 7
 
     with pytest.raises(ValidationError, match="extra_forbidden"):
         ShipPayload.model_validate(data)
@@ -119,3 +119,20 @@ def test_ship_payload_bounds(field, value):
 
     with pytest.raises(ValidationError):
         ShipPayload(**(fields | {field: value}))
+
+
+SESSION = {"gun": "g", "distance_m": 10, "target_profile": "p", "target_profile_version": 1}
+
+
+@pytest.mark.parametrize(
+    ("typed", "stored"),
+    [(None, None), ("Tata", "Tata"), ("  Tata ", "Tata"), ("   ", None), ("Zażółć", "Zażółć")],
+)
+def test_a_shooter_is_stored_as_typed_and_blank_is_the_owner(typed, stored):
+    assert SessionMeta(**SESSION, shooter=typed).shooter == stored
+
+
+@pytest.mark.parametrize("typed", ["-", " - ", "x" * 101])
+def test_a_shooter_needs_a_letter_or_digit_and_a_bounded_length(typed):
+    with pytest.raises(ValidationError):
+        SessionMeta(**SESSION, shooter=typed)

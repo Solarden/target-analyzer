@@ -44,6 +44,9 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--notes", default="")
     parser.add_argument(
+        "--shooter", metavar="NAME", help="who shot it, when it was not you (default: you)"
+    )
+    parser.add_argument(
         "--method",
         choices=(GROUND_TRUTH_METHOD, *DETECTORS),
         default=GROUND_TRUTH_METHOD,
@@ -74,6 +77,7 @@ def main(argv: list[str]) -> int:
             distance_m=args.distance,
             notes=args.notes,
             shot_at=args.date,
+            shooter=args.shooter,
             target_profile=profile.name,
             target_profile_version=profile.version,
         )

@@ -92,3 +92,18 @@ def test_export_keeps_each_photos_holes_apart(
         exported[payload["image_sha256"]] = [(h["x_canon"], h["y_canon"]) for h in payload["hits"]]
 
     assert exported == {one: [(100, 100)], two: [(900, 900), (901, 902)]}
+
+
+def test_export_carries_who_shot_it(client, auth, profile, png_bytes, db_session, tmp_path):
+    session = make_payload(make_jpeg()).session.model_copy(update={"shooter": "Tata"})
+    _ingest(client, auth, png_bytes, size=64, session=session)
+    _ingest(client, auth, png_bytes, size=65)
+
+    assert export(db_session, get_settings().data_path, tmp_path) == 2
+
+    shooters = {
+        json.loads((f / "payload.json").read_text())["session"]["shooter"]
+        for f in tmp_path.iterdir()
+    }
+
+    assert shooters == {"Tata", None}
