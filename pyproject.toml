@@ -38,6 +38,13 @@ client = [
     "opencv-contrib-python>=5.0",
     "httpx2>=2.12",
 ]
+# Training and running the custom detector. Its own extra because torch is a gigabyte of
+# wheels and nothing in the manual or classic-CV path needs it. It names OpenCV itself
+# rather than leaning on `client`, since the exclusion below is project-wide.
+yolo = [
+    "ultralytics>=8.4",
+    "opencv-contrib-python>=5.0",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.8",
@@ -49,6 +56,13 @@ dev = [
     # extra, so the suite never depends on OpenCV being installed to run.
     "httpx2>=2.12",
 ]
+
+[tool.uv]
+# ultralytics wants opencv-python, this project wants opencv-contrib-python. They are two
+# distributions of one `cv2`: install both and whichever unpacks last wins, which is how
+# cv2.aruco silently disappears and registration stops working. Contrib is a superset, so
+# dropping the other requirement loses nothing.
+exclude-dependencies = ["opencv-python"]
 
 [build-system]
 requires = ["hatchling"]

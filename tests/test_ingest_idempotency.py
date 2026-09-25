@@ -13,11 +13,11 @@ import pytest
 from fastapi import HTTPException, Response, status
 from PIL import Image as PILImage
 from sqlmodel import Session, func, select
-from tests.conftest import make_jpeg, make_payload, make_png, post_ingest
 
 from target_analyzer.api.endpoints.ingest import _ingest_onto_existing_image
 from target_analyzer.config import get_settings
 from target_analyzer.models import Hole, Image, Interpretation, ShootingSession
+from tests.conftest import make_jpeg, make_payload, make_png, post_ingest
 
 
 def count(session: Session, model) -> int:

@@ -9,12 +9,12 @@ from datetime import date
 
 import pytest
 from fastapi import status
-from tests.conftest import make_jpeg, make_payload, post_ingest
 
 from ta_shared.payload import Hit, SessionMeta
 from target_analyzer.config import get_settings
 from target_analyzer.models import Image, Interpretation
 from target_analyzer.templating import format_metres
+from tests.conftest import make_jpeg, make_payload, post_ingest
 
 
 def test_the_trend_page_lists_an_ingested_session(auth_client, ingested):

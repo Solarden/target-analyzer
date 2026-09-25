@@ -28,7 +28,7 @@ from ta_client import cv_blob, vlm
 from ta_client.config import Settings, get_settings
 from ta_client.detector import load_session, report
 from ta_shared.payload import MAX_HITS, Hit
-from ta_shared.profile import TargetProfile, mm_per_px
+from ta_shared.profile import TargetProfile, hole_diam_px
 
 # Wide enough that a printed ring line or digit is recognisable as one, tight enough that
 # the candidate is unambiguously the thing in the middle.
@@ -107,7 +107,7 @@ def detect(
     candidates = cv_blob.detect(normalized, profile)
     vlm.check(settings, profile)
     canon = profile.canon_size_px
-    half = round(CROP_HOLE_WIDTHS * cv_blob.DEFAULT_HOLE_DIAM_MM / mm_per_px(profile) / 2)
+    half = round(CROP_HOLE_WIDTHS * hole_diam_px(profile) / 2)
     # Replicated rather than black: a candidate near the paper's edge stays in the middle
     # of its crop, where the prompt says it is, instead of against a border it invented.
     padded = cv2.copyMakeBorder(normalized, half, half, half, half, cv2.BORDER_REPLICATE)

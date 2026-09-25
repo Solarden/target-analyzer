@@ -13,7 +13,6 @@ from fastapi import status
 from pydantic import SecretStr
 from sqlmodel import Session
 from starlette.middleware.sessions import SessionMiddleware
-from tests.conftest import PASSWORD, USERNAME
 
 from target_analyzer import api
 from target_analyzer import auth as auth_module
@@ -22,6 +21,7 @@ from target_analyzer.config import INSECURE_DEFAULT_SECRET, Settings, get_settin
 from target_analyzer.main import SECURITY_HEADERS, create_app
 from target_analyzer.models import User
 from target_analyzer.queries import users
+from tests.conftest import PASSWORD, USERNAME
 
 # Read from the app, never hand-kept: a hand-kept list is one someone forgets to extend,
 # and the route they forget is the one that ships without a login gate. `/` is in it

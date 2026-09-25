@@ -231,6 +231,17 @@ internal_docs
 # Locally stored originals / normalized target images during dev.
 /data/
 
+# Pretrained checkpoints, fetched into the working directory by the training run.
+*.pt
+
+# The original range photos. Irreplaceable and not regenerable, unlike corpus/ below —
+# kept out of this public repo for the same reason out/ is, not because they are scratch.
+/photos/
+
+# Harvested sessions, the generated YOLO dataset and its training runs. All of it is
+# real shooting data or derived from it, and all of it is regenerable.
+/corpus/
+
 # The dev outbox (`--outbox ./out`): a target photo, its warped copy and the payload.
 # Real shooting data, never part of the public repo. The default outbox is under ~.
 out/

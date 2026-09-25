@@ -6,7 +6,11 @@
  *     make css          # one-shot minified build into the static dir
  *     make css-watch    # rebuild on template changes while developing
  */
-@import "tailwindcss";
+/* source(none) turns off automatic detection, so the @source below is the whole input.
+ * Left on, Tailwind reads every non-ignored file in the tree and an ordinary English word
+ * in a Python comment — "fixed", "visible", "container" — silently becomes a utility in
+ * the built sheet, which then fails CI's `git diff --exit-code` on an unrelated change. */
+@import "tailwindcss" source(none);
 
 /* Scan the Jinja templates for class names (relative to this file). */
 @source "./server/target_analyzer/templates";

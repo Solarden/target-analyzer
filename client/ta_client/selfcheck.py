@@ -10,12 +10,16 @@ The registration case is a real photo run backwards: the board is rendered, warp
 is the property the whole product rests on.
 """
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import re
+import sys
 import tempfile
 from datetime import date
+from math import hypot
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,7 +27,7 @@ import cv2
 import httpx2
 import numpy as np
 
-from ta_client import cv_blob, cv_blob_vlm, ship, vlm
+from ta_client import cv_blob, cv_blob_vlm, ship, vlm, yolo, yolo_data
 from ta_client.board import render_markers, render_svg
 from ta_client.config import Settings
 from ta_client.detector import DetectorError
@@ -34,7 +38,7 @@ from ta_client.register import Registration, TooFewMarkers, refine_to_rings, reg
 from ta_client.ship import _parts
 from ta_shared.agreement import MATCH_TOL_MM, agreement
 from ta_shared.payload import Hit, SessionMeta, ShipPayload
-from ta_shared.profile import TargetProfile, load_profile, mm_per_px
+from ta_shared.profile import TargetProfile, hole_diam_px, load_profile, mm_per_px
 
 # Stands in for the machine token wherever a Settings is built here. Not a credential:
 # nothing in this file reaches a network, so no server ever sees it.
@@ -107,7 +111,7 @@ def _clean_target(profile: TargetProfile) -> tuple[np.ndarray, list[tuple[float,
     for radius in profile.ring_radii_px:
         cv2.circle(image, centre, radius, (90, 90, 90), 1, cv2.LINE_AA)
 
-    radius = round(cv_blob.DEFAULT_HOLE_DIAM_MM / mm_per_px(profile) / 2)
+    radius = round(hole_diam_px(profile) / 2)
     black = profile.ring_radius_px(profile.black_ring)
     holes = [
         (centre[0] + black * 0.4, centre[1] - black * 0.3),
@@ -491,6 +495,196 @@ def selfcheck() -> None:
     except ValueError as exc:
         assert "padded" in str(exc), str(exc)
 
+    # --- the trained detector, without weights and without torch ---
+    # Everything except the model: which tiles are cut, where a box inside one lands, and
+    # what two tiles reporting one hole do. The predictor is injected, so nothing loads.
+    tile, stride, margin = yolo.geometry(pistol)
+    # The seam rule holds only because the safe interiors touch: what one tile drops near
+    # a cut edge, its neighbour holds well inside. Without this the policy loses holes.
+    places = yolo.origins(pistol.canon_size_px, tile, stride)
+
+    assert places[0] == 0 and places[-1] == pistol.canon_size_px - tile, places
+    assert all(b + margin <= a + tile - margin for a, b in zip(places, places[1:], strict=False)), (
+        places
+    )
+
+    def finding(*points: tuple[float, float], confidence: float = 0.9):
+        """A model that sees every one of ``points`` in whichever tile contains it."""
+
+        def predict(crops, _settings):
+            if not crops:  # the load probe check() makes; there is nothing here to load
+                return []
+
+            offsets = [(x, y) for x, y, _crop in yolo.tiles(target, pistol)]
+
+            assert len(offsets) == len(crops), (len(offsets), len(crops))
+
+            return [
+                [
+                    (px - ox - 6, py - oy - 6, px - ox + 6, py - oy + 6, confidence)
+                    for px, py in points
+                    if 0 <= px - ox < tile and 0 <= py - oy < tile
+                ]
+                for ox, oy in offsets
+            ]
+
+        return predict
+
+    with tempfile.TemporaryDirectory() as tmp:
+        weights = Path(tmp) / "yolov8n-target-v3.pt"
+        weights.write_bytes(b"0")  # never opened: the predictor is injected
+        run_output = weights.with_name("best.pt")
+        run_output.write_bytes(b"0")
+        trained = _settings(yolo_weights=weights)
+        read = yolo.detect(target, pistol, settings=trained, predict=finding(*punched))
+
+        # Every hole is cut into as many as four tiles, so this is the seam policy and the
+        # overlap merge as much as it is the tile-to-canonical arithmetic.
+        assert len(read) == len(punched), (len(read), len(punched))
+
+        for px, py in punched:
+            nearest = min(hypot(hit.x_canon - px, hit.y_canon - py) for hit in read)
+
+            assert nearest < 0.5, (px, py, nearest)
+
+        assert all(0 < hit.confidence <= 1 for hit in read), read
+        assert [hit.confidence for hit in read] == sorted(
+            (hit.confidence for hit in read), reverse=True
+        )
+        assert yolo.model_name(trained) == "yolov8n-target-v3", yolo.model_name(trained)
+        assert yolo.detect(target, pistol, settings=trained, predict=finding()) == []
+
+        try:
+            yolo.detect(target, load_profile(PROFILE_JSON), settings=trained, predict=finding())
+            raise AssertionError("an image that is not the canonical square must be refused")
+        except ValueError as exc:
+            assert not isinstance(exc, DetectorError), "a wrong frame is a bug, not a bad day"
+            assert "canonical square" in str(exc), str(exc)
+
+        for settings, hint in (
+            (_settings(), "TA_YOLO_WEIGHTS"),
+            # Blanked the way TA_SERVER_URL= is.
+            (_settings(yolo_weights=""), "TA_YOLO_WEIGHTS"),
+            (_settings(yolo_weights=Path(tmp) / "gone.pt"), "gone.pt"),
+            (_settings(yolo_weights=run_output), "rename"),
+        ):
+            try:
+                yolo.check(settings, pistol, predict=finding())
+                raise AssertionError(f"{hint} must be refused")
+            except DetectorError as exc:
+                assert hint in str(exc), str(exc)
+
+        try:
+            scaleless = pistol.model_copy(update={"target_diam_mm": None})
+            yolo.check(trained, scaleless, predict=finding())
+            raise AssertionError("a profile with no scale must be refused")
+        except DetectorError as exc:
+            assert "target_diam_mm" in str(exc), str(exc)
+
+    # --- the dataset a model is trained on, and the ways a split lies ---
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+
+        def marked(digest: str, image: np.ndarray, epoch: int = 1790000000) -> Path:
+            """A hand-marked session folder for ``digest``, holes where _clean_target put them."""
+            folder = root / f"{epoch}-{digest[:12]}-manual"
+            folder.mkdir()
+            cv2.imwrite(str(folder / "normalized.png"), image)
+            (folder / "payload.json").write_text(
+                build_payload(
+                    image_sha256=digest,
+                    profile=pistol,
+                    registration=Registration(np.eye(3), target, None, 4, 4, "manual"),
+                    hits=[Hit(x_canon=x, y_canon=y) for x, y in punched],
+                    session=SessionMeta(
+                        gun="G", distance_m=15, target_profile=pistol.name, target_profile_version=1
+                    ),
+                ).model_dump_json(),
+                encoding="utf-8",
+            )
+
+            return folder
+
+        held, kept = marked("a" * 64, target), marked("e" * 64, target)
+        sessions = [held, kept]
+        dataset = root / "ds"
+        yolo_data.build(sessions, dataset, pistol, set())
+        yolo_data.build(sessions, dataset, pistol, {"a" * 12})
+        trained_on = {p.name.split("_")[0] for p in (dataset / "images" / "train").iterdir()}
+        validated_on = {p.name.split("_")[0] for p in (dataset / "images" / "val").iterdir()}
+
+        # The tiles of run one must be gone, or the photo held out of training is still in
+        # it and every "measured on unseen paper" number after that is memorisation.
+        assert trained_on == {"e" * 12}, f"a rebuilt split leaks: {trained_on}"
+        assert validated_on == {"a" * 12}, validated_on
+
+        # The client extra has no YAML parser, so the quoting is proven through json.
+        odd = root / "runs: v2 #best"
+        yolo_data.build(sessions, odd, pistol, set())
+        line = (odd / "data.yaml").read_text(encoding="utf-8").splitlines()[0]
+
+        assert json.loads(line.removeprefix("path: ")) == str(odd.resolve()), line
+
+        for val, hint in (({"b" * 12}, "b" * 12), ({"a" * 12, "e" * 12}, "nothing to train")):
+            try:
+                yolo_data.build(sessions, dataset, pistol, val)
+                raise AssertionError(f"{val} must be refused")
+            except SystemExit as exc:
+                assert hint in str(exc), str(exc)
+
+        # Two markings of one photo can disagree, so the later one trains — and says so.
+        later = marked("a" * 64, target, epoch=1790000009)
+        heard = io.StringIO()
+
+        with contextlib.redirect_stderr(heard):
+            chosen = yolo_data._readings([held, later], pistol)["a" * 12][0]
+
+        assert chosen == later, chosen
+        assert f"{held.name}: superseded" in heard.getvalue(), heard.getvalue()
+
+        # Clearing is how the split stays honest, so it must reach nothing it did not write.
+        theirs = root / "theirs"
+        (theirs / "images").mkdir(parents=True)
+        (theirs / "images" / "keep.png").write_bytes(b"theirs")
+
+        try:
+            yolo_data.build(sessions, theirs, pistol, set())
+            raise AssertionError("a directory this tool did not write must not be cleared")
+        except SystemExit as exc:
+            assert "refusing to clear" in str(exc), str(exc)
+
+        assert (theirs / "images" / "keep.png").is_file(), "the clear reached somebody's files"
+
+        # A rebuild that cannot happen must leave the dataset already there.
+        validation = dataset / "images" / "val"
+        before = sorted(p.name for p in validation.iterdir())
+        crafted = marked("f" * 64, target)
+        text = (crafted / "payload.json").read_text(encoding="utf-8")
+        (crafted / "payload.json").write_text(
+            text.replace("f" * 64, "../../../../etc/x"), encoding="utf-8"
+        )
+
+        for unusable in (marked("c" * 64, target[:100, :100]), crafted):
+            try:
+                yolo_data.build([unusable], dataset, pistol, set())
+                raise AssertionError(f"{unusable.name} must be refused")
+            except SystemExit as exc:
+                assert "no usable" in str(exc), str(exc)
+
+            after = sorted(p.name for p in validation.iterdir()) if validation.is_dir() else []
+
+            assert after == before, f"{unusable.name}: a refused rebuild emptied the dataset"
+
+        assert not list(root.glob("*_r0c0.png")), "a crafted digest wrote outside the dataset"
+
+    assert sorted(
+        [Path("10-aaaaaaaaaaaa-manual"), Path("2-aaaaaaaaaaaa-manual")], key=yolo_data._epoch
+    ) == [Path("2-aaaaaaaaaaaa-manual"), Path("10-aaaaaaaaaaaa-manual")]
+
+    # The lazy import is the contract: this module must stay usable, and this self-check
+    # must stay runnable, on a machine that has only the client extra installed.
+    assert "torch" not in sys.modules, "yolo imported torch without being asked for a model"
+
     # --- the printable sheet is to scale ---
     svg = render_svg(profile)
     assert 'width="175.500mm"' in svg  # 155.5 mm of target plus the two 10 mm margins
@@ -564,9 +758,11 @@ def selfcheck() -> None:
         refused = root / "refused"
         _queue(refused, "40-111111111111-manual")
 
-        # Both stop shipping, but for different reasons, and the message is the whole point:
-        # a redirect means the URL's scheme is wrong, never that the folder should be binned.
-        for code, hint in ((401, "delete that folder"), (301, "TA_SERVER_URL")):
+        # Setting one of these aside would empty the whole outbox into failed/, one refusal
+        # at a time.
+        stops = ((401, "not this folder"), (404, "not this folder"), (301, "TA_SERVER_URL"))
+
+        for code, hint in stops:
             try:
                 ship.flush(refused, settings=settings, send=lambda *_, c=code: _reply(c))
                 raise AssertionError(f"{code} must stop shipping, not clear the folder")
@@ -574,6 +770,55 @@ def selfcheck() -> None:
                 assert hint in str(exc), (code, str(exc))
 
             assert [p.name for p in ship.pending(refused)] == ["40-111111111111-manual"], code
+
+        # A server behind the client's contract refuses detector readings; the hand-marked
+        # ones behind them must still ship.
+        aside = root / "aside"
+        _queue(aside, "50-222222222222-yolo", "51-333333333333-manual")
+        answers = iter((422, 201))
+
+        assert ship.flush(aside, settings=settings, send=lambda *_: _reply(next(answers))) == 0
+        assert (aside / "failed" / "50-222222222222-yolo").is_dir(), "a refusal was lost"
+        assert ship.pending(aside) == [], "a refusal held back the reading behind it"
+
+        # The ground truth refused — a size cap hits exactly the folder with the original.
+        pair = root / "pair"
+        _queue(pair, "60-444444444444-manual", "60-444444444444-yolo")
+        reached: list[str] = []
+
+        def capped(_client, folder: Path, _settings) -> SimpleNamespace:
+            reached.append(folder.name)
+
+            return _reply(413)
+
+        assert ship.flush(pair, settings=settings, send=capped) == 0
+        assert reached == ["60-444444444444-manual"], f"a detector overtook its truth: {reached}"
+        assert [p.name for p in ship.failed(pair)] == [
+            "60-444444444444-manual",
+            "60-444444444444-yolo",
+        ], "the pair must go aside together, so they come back together"
+
+        # Re-marked before it ever shipped.
+        remarked = root / "remarked"
+        _queue(
+            remarked, "100-555555555555-manual", "100-555555555555-yolo", "200-555555555555-manual"
+        )
+
+        assert [p.name for p in ship.pending(remarked)] == [
+            "200-555555555555-manual",
+            "100-555555555555-yolo",
+        ], ship.pending(remarked)
+
+        # Refused under a name failed/ already holds: neither copy is overwritten.
+        again = root / "again"
+        _queue(again, "70-666666666666-yolo")
+        earlier = again / "failed" / "70-666666666666-yolo"
+        earlier.mkdir(parents=True)
+        (earlier / "note").write_text("the earlier refusal", encoding="utf-8")
+        ship.flush(again, settings=settings, send=lambda *_: _reply(422))
+
+        assert (earlier / "note").is_file(), "an earlier refusal was overwritten"
+        assert [p.name for p in ship.pending(again)] == ["70-666666666666-yolo"], "one was lost"
 
         # Two readings of one photo by one method, and an unrelated third.
         deduped = root / "deduped"

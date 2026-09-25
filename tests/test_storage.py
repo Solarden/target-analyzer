@@ -4,9 +4,9 @@ from io import BytesIO
 
 import pytest
 from PIL import Image as PILImage
-from tests.conftest import make_jpeg, make_png
 
 from target_analyzer import storage
+from tests.conftest import make_jpeg, make_png
 
 
 @pytest.mark.parametrize(

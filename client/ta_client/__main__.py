@@ -13,7 +13,7 @@ from pathlib import Path
 import cv2
 from pydantic import ValidationError
 
-from ta_client import cv_blob, cv_blob_vlm, ship, vlm
+from ta_client import cv_blob, cv_blob_vlm, ship, vlm, yolo
 from ta_client.config import get_settings
 from ta_client.detector import DetectorError
 from ta_client.hits import pick_hits
@@ -27,7 +27,7 @@ from ta_shared.profile import load_profile
 # read it, so every name the flag accepts is a name that does something. Modules rather
 # than functions, because a reading is three things the runner needs and one of them —
 # which model answered — is not in the hits.
-DETECTORS = {"cv_blob": cv_blob, "vlm": vlm, "cv_blob_vlm": cv_blob_vlm}
+DETECTORS = {"cv_blob": cv_blob, "vlm": vlm, "cv_blob_vlm": cv_blob_vlm, "yolo": yolo}
 
 
 def main(argv: list[str]) -> int:
@@ -166,6 +166,11 @@ def main(argv: list[str]) -> int:
         ship.flush(outbox, settings=settings)
     except ship.ShipError as exc:
         print(exc, file=sys.stderr)
+
+        return 1
+
+    if held := ship.failed(outbox):
+        print(f"{len(held)} set aside in {outbox / 'failed'}, not sent", file=sys.stderr)
 
         return 1
 
