@@ -100,7 +100,11 @@ def main(argv: list[str]) -> int:
         except DetectorError as exc:
             parser.error(str(exc))
 
-    photo, original_jpg, digest = load_stripped(args.photo)
+    try:
+        photo, original_jpg, digest = load_stripped(args.photo)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     registration = register_interactive(photo, profile)
 
     if registration is None:

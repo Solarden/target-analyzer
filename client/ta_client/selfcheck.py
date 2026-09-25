@@ -18,23 +18,33 @@ import os
 import re
 import sys
 import tempfile
+from collections.abc import Iterator
 from datetime import date
 from math import hypot
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import cv2
 import httpx2
 import numpy as np
 
-from ta_client import cv_blob, cv_blob_vlm, ship, vlm, yolo, yolo_data
+from ta_client import cv_blob, cv_blob_vlm, marks, pick, ship, vlm, yolo, yolo_data
 from ta_client.board import render_markers, render_svg
 from ta_client.config import Settings
 from ta_client.detector import DetectorError
 from ta_client.load import load_stripped
 from ta_client.package import build_payload
 from ta_client.pick import _loupe, _Picking
-from ta_client.register import Registration, TooFewMarkers, refine_to_rings, register, warp
+from ta_client.register import (
+    Registration,
+    TooFewMarkers,
+    _ring_lines,
+    refine_to_rings,
+    register,
+    register_interactive,
+    warp,
+)
 from ta_client.ship import _parts
 from ta_shared.agreement import MATCH_TOL_MM, agreement
 from ta_shared.payload import Hit, SessionMeta, ShipPayload
@@ -59,6 +69,13 @@ PROBES = np.float32(
     [[500, 500], [0, 0], [1000, 0], [1000, 1000], [0, 1000], [500, 0], [1000, 500]]
 ).reshape(-1, 1, 2)
 TOLERANCE_PX = 2.0
+# The corner marks overhang the canonical square, so the sheet carrying them is wider.
+MARK_PAD = 200
+# Keystoned hard enough that the disc's frame alone misses the marks by tens of pixels, on a
+# dark background surrounding the whole sheet: that nests the black disc inside another
+# contour, where a search of outer contours never looks.
+MARKS_PHOTO_SIZE = (2400, 2800)
+MARKS_QUAD = np.float32([[420, 300], [2100, 120], [2300, 2650], [150, 2500]])
 
 
 def _synthetic_photo(profile: TargetProfile) -> tuple[np.ndarray, np.ndarray]:
@@ -146,6 +163,59 @@ def _jpeg_with_exif() -> bytes:
     app1 = b"Exif\x00\x00" + b"II*\x00\x08\x00\x00\x00\x00\x00"
 
     return plain[:2] + b"\xff\xe1" + (len(app1) + 2).to_bytes(2, "big") + app1 + plain[2:]
+
+
+def _marked_photo(profile: TargetProfile, *, with_marks: bool) -> tuple[np.ndarray, np.ndarray]:
+    """A photo of a sheet with no marker board, and where its four corner marks landed."""
+    sheet, _holes = _clean_target(profile)
+    sheet = cv2.copyMakeBorder(sheet, *[MARK_PAD] * 4, cv2.BORDER_CONSTANT, value=(235,) * 3)
+    corners = np.float32(profile.manual_corners_canon) + MARK_PAD
+    per_mm = 1 / mm_per_px(profile)
+    half = round(marks.CROSS_HALF_MM * per_mm)
+
+    for x, y in corners.round().astype(int).tolist() if with_marks else []:
+        cv2.circle(sheet, (x, y), round(marks.MARK_RADIUS_MM * per_mm), (40,) * 3, 3, cv2.LINE_AA)
+        cv2.line(sheet, (x - half, y), (x + half, y), (40,) * 3, 3, cv2.LINE_AA)
+        cv2.line(sheet, (x, y - half), (x, y + half), (40,) * 3, 3, cv2.LINE_AA)
+
+    side = sheet.shape[0]
+    square = np.float32([[0, 0], [side, 0], [side, side], [0, side]])
+    to_photo = cv2.getPerspectiveTransform(square, MARKS_QUAD)
+    photo = cv2.warpPerspective(sheet, to_photo, MARKS_PHOTO_SIZE, borderValue=(60,) * 3)
+
+    return photo, cv2.perspectiveTransform(corners.reshape(-1, 1, 2), to_photo).reshape(-1, 2)
+
+
+def _registering(
+    photo: np.ndarray,
+    profile: TargetProfile,
+    *,
+    confirms: list[bool],
+    clicks: list[list[float]] | None = None,
+) -> list[tuple[str, object]]:
+    """Run register_interactive with the windows replaced; what it asked for, in order."""
+    seen: list[tuple[str, object]] = []
+    answers: Iterator[bool] = iter(confirms)
+
+    def _confirm(_image: np.ndarray, _title: str, lines: list[str]) -> bool:
+        seen.append(("confirm", lines[1]))
+
+        return next(answers)
+
+    def _pick(_image: np.ndarray, _title: str, **kwargs) -> list[tuple[float, float]]:
+        seen.append(("pick", kwargs.get("initial")))
+        assert clicks is not None, f"the corner picker opened where it should not have: {seen}"
+
+        return [tuple(point) for point in clicks]
+
+    with (
+        mock.patch.object(pick, "confirm", _confirm),
+        mock.patch.object(pick, "pick_points", _pick),
+        contextlib.redirect_stderr(io.StringIO()),
+    ):
+        assert register_interactive(photo, profile) is not None
+
+    return seen
 
 
 def selfcheck() -> None:
@@ -242,15 +312,72 @@ def selfcheck() -> None:
     settled_back = cv2.perspectiveTransform(corners, settled.homography)
     assert np.abs(settled_back - corners).max() < 3.0, np.abs(settled_back - corners).max()
 
+    # A black with no ring lines round it is a scale, not a set of lines to bend onto.
+    assert settled.radial is None, settled.radial
+
+    # --- then each printed line is bent onto its ring, however unevenly the print drifts ---
+    outer = pistol.ring_radii_px[-1]
+    black = pistol.ring_radius_px(pistol.black_ring)
+    drifting = np.full_like(flat, 255)
+    # Drifting outward from nothing at the centre, the way real sheets do.
+    shift = 4
+
+    def _drawn(radius: float) -> int:
+        return round(radius * (1 + 0.025 * radius / outer) * (1 << shift))
+
+    centre_fp = (middle << shift, middle << shift)
+    cv2.circle(drifting, centre_fp, _drawn(black), (20,) * 3, -1, cv2.LINE_AA, shift)
+
+    for ring in range(1, pistol.n_rings + 1):
+        radius = pistol.ring_radius_px(ring)
+        colour = (20,) * 3 if radius > black else (235,) * 3
+
+        if ring != pistol.black_ring:
+            cv2.circle(drifting, centre_fp, _drawn(radius), colour, 2, cv2.LINE_AA, shift)
+
+    as_shot = Registration(np.eye(3), drifting, None, 0, 4, "manual")
+    bent = refine_to_rings(drifting, as_shot, pistol)
+    assert bent.radial is not None, "every ring line was printed and should have been read"
+    read = _ring_lines(bent.normalized, pistol)
+    off = {ring: read[ring] - pistol.ring_radius_px(ring) for ring in read}
+    assert len(off) == pistol.n_rings - 1 and max(map(abs, off.values())) < 0.5, off
+
     # A profile with no black has nothing to measure, and must say so rather than guess.
     assert refine_to_rings(photo, registration, profile).ring_correction is None
 
+    # --- the printed corner marks register a sheet with no marker board ---
+    marked, where = _marked_photo(pistol, with_marks=True)
+    found = marks.find_marks(marked, pistol)
+    assert found is not None and found.confident, found
+    miss = np.linalg.norm(np.asarray(found.corners) - where, axis=1)
+    assert miss.max() < 0.25, miss
+
+    # The disc alone is not a registration: without the marks there is nothing to vouch.
+    bare = marks.find_marks(_marked_photo(pistol, with_marks=False)[0], pistol)
+    assert bare is not None and not bare.confident, bare.scores
+
+    # --- and the interactive path routes between them without a window ---
+    # Clear marks go straight to the confirm; turned down, the picker opens holding them.
+    seen = _registering(marked, pistol, confirms=[True])
+    assert [step for step, _ in seen] == ["confirm"], seen
+    assert "printed corner marks" in seen[0][1], seen
+
+    seen = _registering(marked, pistol, confirms=[False, True], clicks=where.tolist())
+    assert [step for step, _ in seen] == ["confirm", "pick", "confirm"], seen
+    held = seen[1][1]
+    assert held is not None and np.allclose(held, found.corners), "the picker should hold the marks"
+
+    # With no mark found there is nothing worth seeding, so the picker opens empty.
+    bare_photo = _marked_photo(pistol, with_marks=False)[0]
+    seen = _registering(bare_photo, pistol, confirms=[True], clicks=where.tolist())
+    assert seen[0] == ("pick", None), seen
+
     # The round trip above runs on a registration the rings never touched; this is the
-    # shape that actually ships, and it carries one field more.
+    # shape that actually ships, and it carries two fields more.
     settled_payload = build_payload(
         image_sha256=digest,
         profile=pistol,
-        registration=settled,
+        registration=bent,
         hits=[Hit(x_canon=750, y_canon=750)],
         session=SessionMeta(
             gun="Glock",

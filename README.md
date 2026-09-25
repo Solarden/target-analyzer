@@ -19,8 +19,9 @@ and a custom YOLO on identical data.
 Two pieces:
 
 - **Mac — the processing client.** Loads a photo, registers it to a fixed
-  *canonical frame* via homography (an ArUco marker board, least-squares fit),
-  marks hits by clicking, and ships canonical `(x, y)` coordinates to the server.
+  *canonical frame* via homography (an ArUco marker board, least-squares fit, or
+  the four ⊕ corner marks a stock target already carries), marks hits by clicking,
+  and ships canonical `(x, y)` coordinates to the server.
   An offline outbox queues submissions when the server is unreachable.
 - **Raspberry Pi — the server.** A FastAPI app that turns coordinates
   into ring scores + metrics from the (versioned) target profile, persists to
@@ -140,8 +141,10 @@ sheet in frame — walk up to it rather than shooting from the firing line. The 
 every photo the same 1500 px square, but it cannot invent detail the camera never caught,
 and a hole is a few millimetres across. Then run the pipeline: it warps the photo into
 the canonical frame, asks you to confirm the rings landed on the printed ones, and lets
-you click the holes. The session then goes to the
-server; if the server is unreachable it stays in the outbox
+you click the holes. A sheet with the four printed ⊕ corner marks finds them itself; the
+corner picker opens only when one is unclear — cut off by the photo's edge, say — and it
+opens holding what was found, so a wrong corner is a drag rather than four clicks. The
+session then goes to the server; if the server is unreachable it stays in the outbox
 (`~/.target-analyzer/outbox/`, overridable with `--outbox`) and the next run sends it,
 oldest first. Ingest is idempotent on the photo's sha256, so a replayed flush never
 creates a second session.

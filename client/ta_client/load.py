@@ -28,7 +28,7 @@ def _header(path: Path) -> bytes:
     except OSError as exc:
         # Inside the Photos library this is a permissions refusal, which OpenCV would
         # report as an undecodable image. Export the photo out of the library instead.
-        raise ValueError(f"cannot read {path}: {exc}") from exc
+        raise ValueError(f"cannot read {path}: {exc.strerror or exc}") from exc
 
 
 def _is_iso_bmff(header: bytes) -> bool:
