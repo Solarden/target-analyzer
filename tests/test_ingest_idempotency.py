@@ -7,6 +7,7 @@ production, by mis-scored data.
 """
 
 import hashlib
+import json
 from io import BytesIO
 
 import pytest
@@ -208,6 +209,24 @@ def test_a_future_schema_version_is_rejected(client, auth, profile, png_bytes):
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "schema_version" in response.json()["detail"]
+
+
+def test_a_field_this_server_does_not_know_is_422_not_dropped(
+    client, auth, profile, db_session, png_bytes
+):
+    """Accepting it would store the session without the field, and a 409 forever after."""
+    raw = make_payload(make_jpeg()).model_dump(mode="json")
+    raw["session"]["shooter"] = "Tata"
+    response = client.post(
+        "/api/ingest",
+        headers=auth,
+        data={"payload": json.dumps(raw)},
+        files={"normalized": ("n.png", png_bytes, "image/png")},
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+    assert [e["loc"] for e in response.json()["detail"]] == [["session", "shooter"]]
+    assert db_session.exec(select(func.count()).select_from(ShootingSession)).one() == 0
 
 
 # Bare NaN survives pydantic's JSON parser, so it reaches the error detail as a float.

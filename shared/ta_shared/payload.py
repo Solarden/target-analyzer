@@ -7,7 +7,7 @@ the shape of what crosses the network. See implementation.md §3.
 from datetime import UTC, date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Blast radius, not realism: every hit becomes a row inserted in one transaction.
 MAX_HITS = 200
@@ -20,7 +20,13 @@ Method = Literal["manual", "cv_blob", "vlm", "cv_blob_vlm", "yolo"]
 GROUND_TRUTH_METHOD: Method = "manual"
 
 
-class Hit(BaseModel):
+# Refused rather than dropped: a client ahead of its server would otherwise have the new
+# field discarded and the rest stored, for good, since re-sending a held photo is a 409.
+class _Wire(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class Hit(_Wire):
     # A non-finite coordinate scores as a miss and then breaks the metrics JSON. The
     # range check against canon_size_px is the server's (§7).
     x_canon: float = Field(allow_inf_nan=False)
@@ -28,7 +34,7 @@ class Hit(BaseModel):
     confidence: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
 
 
-class SessionMeta(BaseModel):
+class SessionMeta(_Wire):
     gun: str = Field(max_length=100)
     # Indexed with `gun` and filtered on, so a non-finite value matches nothing ever.
     distance_m: float = Field(gt=0, allow_inf_nan=False)
@@ -38,7 +44,7 @@ class SessionMeta(BaseModel):
     target_profile_version: int = Field(ge=1)
 
 
-class ShipPayload(BaseModel):
+class ShipPayload(_Wire):
     schema_version: int = 1
     # The idempotency key, and a unique index: lowercase hex or nothing.
     image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
