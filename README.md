@@ -118,7 +118,8 @@ TA_SERVER_URL=https://target.example.com
 TA_INGEST_TOKEN=the-token-create_token-printed
 TA_SHIP_ORIGINAL=true
 
-# Only for --method vlm: any OpenAI-compatible endpoint that accepts an image.
+# For --method cv_blob_vlm and the two vision-model scoring tools above: any
+# OpenAI-compatible endpoint that accepts an image.
 TA_VLM_BASE_URL=https://vision.example.com/v1
 TA_VLM_MODEL=the-model-tag
 TA_VLM_API_KEY=only-if-the-endpoint-wants-one
@@ -146,16 +147,14 @@ oldest first. Ingest is idempotent on the photo's sha256, so a replayed flush ne
 creates a second session.
 
 `--method cv_blob` runs the blob detector first and opens the hole picker on what it
-found, to drag, delete or add to. `--method vlm` does the same with a vision model, which
-trades the blob filter's sub-millimetre placement for the ability to tell a hole from a
-printed digit — a picture of a target is mostly things that are hole-shaped and are not
-holes.
+found, to drag, delete or add to.
 
-`--method cv_blob_vlm` is the two together, and on a measured target it is the better of
-them: the blob filter proposes, the model is shown a close crop of each proposal and asked
-whether it is really a hole, and the survivors keep the blob filter's coordinates. It costs
-one model call per proposal rather than one per photo, so it is the slowest method by some
-way.
+`--method cv_blob_vlm` adds a vision model, because a picture of a target is mostly things
+that are hole-shaped and are not holes: the blob filter proposes, the model is shown a close
+crop of each proposal and asked whether it is really a hole, and the survivors keep the blob
+filter's coordinates. The model is not offered on its own — shown a whole frame, it cannot
+place a hole precisely enough to score it. It costs one model call per proposal rather than
+one per photo, so it is the slowest method by some way.
 
 `--method yolo` runs a model trained on this project's own photos. It needs
 `uv sync --extra yolo` and `TA_YOLO_WEIGHTS` pointing at a trained model — there is none in
