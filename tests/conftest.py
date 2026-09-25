@@ -89,6 +89,11 @@ def _database() -> Iterator[Engine]:
     finally:
         SQLModel.metadata.drop_all(engine)
 
+        # scripts/alembic_check.sh may share this database: a surviving version row makes its
+        # next `upgrade head` a no-op over the tables just dropped.
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
+
 
 def _reset_all_tables(engine: Engine) -> None:
     """Wipe every table (and restart id sequences) between tests."""
