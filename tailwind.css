@@ -11,40 +11,39 @@
  * in a Python comment — "fixed", "visible", "container" — silently becomes a utility in
  * the built sheet, which then fails CI's `git diff --exit-code` on an unrelated change. */
 @import "tailwindcss" source(none);
+/* The shared dark skin: tokens and the look of the base elements. Rules below carry
+ * size and layout only. */
+@import "./skin.css" layer(base);
 
 /* Scan the Jinja templates for class names (relative to this file). */
 @source "./server/target_analyzer/templates";
 
-/* Each token generates utilities: --color-foo -> bg-foo / text-foo / fill-foo. */
-@theme {
-  --color-bg: #0f1115;
-  --color-panel: #1a1d24;
-  --color-line: #2a2f3a;
-  --color-fg: #e6e9ef;
-  --color-muted: #9aa3b2;
-  --color-accent: #4f8cff;
-  /* Solid buttons only: white on #4f8cff is 3.2:1 and fails AA, while #4f8cff
-   * itself stays fine for links and focus rings on the dark ground (5.2:1). */
-  --color-accent-strong: #3366cc;
-  --color-pos: #3fb950;
-  --color-neg: #f0686b;
-  /* Field borders. --color-line is ~1.3:1 on a panel, under the 3:1 WCAG 1.4.11
-   * wants for an input boundary; this is ~3.5:1 and still subtle. */
-  --color-field-border: #6b7280;
-  --font-sans: system-ui, -apple-system, sans-serif;
+/* The skin's tokens as utilities: --color-foo -> bg-foo / text-foo / fill-foo.
+ * `inline` makes each utility read the skin variable itself (fill-pos -> var(--pos)). */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-pos: var(--pos);
+  --color-neg: var(--neg);
+  --color-warn: var(--warn);
+  --color-field-border: var(--field-border);
+  --font-sans: var(--sans);
 }
 
 @layer base {
   /* Column flex so the footer lands at the bottom of the viewport: most pages here are
    * short, and a footer floating a third of the way down leaves a screen of nothing. */
   body {
-    @apply m-0 flex min-h-screen flex-col bg-bg text-fg font-sans leading-normal;
-    font-size: 15px;
-    color-scheme: dark;
+    @apply flex min-h-screen flex-col;
   }
 
   header {
-    @apply flex flex-wrap items-baseline gap-x-4 gap-y-3 border-b border-line px-5 py-3;
+    @apply flex flex-wrap items-baseline gap-x-4 gap-y-3 px-5 py-3;
   }
   header h1 {
     @apply m-0 text-base;
@@ -76,36 +75,28 @@
     @apply mb-2 mt-0 text-sm;
   }
 
-  table {
-    @apply w-full border-collapse;
-  }
   th,
   td {
-    @apply border-b border-line px-3 py-2.5 text-left;
-  }
-  th {
-    @apply text-[13px] font-semibold text-muted;
+    @apply px-3 py-2.5;
   }
 
   label {
-    @apply mb-1 block text-[13px] text-muted;
+    @apply mb-1 block;
   }
 
   input,
   select,
   button {
-    @apply h-10 max-w-full rounded-md border border-field-border bg-bg px-2 text-fg md:h-9;
-    font: inherit;
+    @apply h-10 max-w-full px-2 md:h-9;
   }
   button {
-    @apply cursor-pointer border-accent-strong bg-accent-strong text-white transition-colors hover:border-accent hover:bg-accent;
+    @apply transition-colors;
   }
   button.ghost {
     @apply border-field-border bg-transparent text-muted transition-colors hover:border-fg hover:text-fg;
   }
   textarea {
-    @apply block w-full max-w-[640px] rounded-md border border-field-border bg-bg px-2 py-1.5 text-fg;
-    font: inherit;
+    @apply block w-full max-w-[640px] px-2 py-1.5;
   }
 
   code {
@@ -113,24 +104,16 @@
   }
 
   footer {
-    @apply border-t border-line px-5 py-3.5 text-center text-xs text-muted;
+    @apply px-5 py-3.5;
   }
   footer a {
     @apply text-muted hover:text-fg;
-  }
-
-  button:focus-visible,
-  select:focus-visible,
-  input:focus-visible,
-  textarea:focus-visible,
-  a:focus-visible {
-    @apply outline outline-2 outline-offset-2 outline-accent;
   }
 }
 
 @layer components {
   .panel {
-    @apply mb-4 overflow-x-auto rounded-lg border border-line bg-panel p-4;
+    @apply mb-4 overflow-x-auto p-4;
   }
   .panel-narrow {
     @apply mx-auto mt-10 max-w-[360px];
@@ -139,9 +122,6 @@
    * width. */
   .panel-narrow input {
     @apply w-full;
-  }
-  .muted {
-    @apply text-muted;
   }
   .flash {
     @apply rounded-md border border-line px-3 py-2;
