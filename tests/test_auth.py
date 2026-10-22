@@ -65,6 +65,13 @@ def test_an_unauthenticated_request_ends_at_the_login_page(client, method, path)
     assert client.request(method, path).url.path == "/login"
 
 
+def test_the_login_page_names_the_app_without_the_logged_in_controls(client):
+    page = client.get("/login").text
+
+    assert '<a href="/dashboard">target-analyzer</a>' in page
+    assert "Log out" not in page
+
+
 def test_a_deactivated_user_never_sees_the_logged_in_header(auth_client, user, db_session):
     """The header follows the resolved user, not the cookie: a stale `user_id` would
     otherwise render a Log out button on the login page they were just bounced to.
@@ -171,6 +178,13 @@ def test_every_response_carries_the_security_headers(client, path):
     response = client.get(path, follow_redirects=False)
 
     assert {name: response.headers.get(name) for name in SECURITY_HEADERS} == SECURITY_HEADERS
+
+
+def test_scripts_run_only_from_served_files():
+    """No inline handler or script is allowed back in: the JSON data island is not executed,
+    so the pages need nothing beyond 'self'.
+    """
+    assert "unsafe-inline" not in SECURITY_HEADERS["Content-Security-Policy"]
 
 
 @pytest.mark.parametrize("secure", [True, False])

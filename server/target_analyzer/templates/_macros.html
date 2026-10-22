@@ -16,13 +16,33 @@
     {% endif %}
     {# ring_radii_px ascends centre-outward, so reversed it runs outermost-first:
        the paint order that keeps the inner rings on top. #}
+    {# Over a photo of white paper the grey ring line alone is about 1:1; the dark halo
+       under it is what keeps it visible. #}
     {% for radius in overlay.profile.ring_radii_px | reverse %}
+      {% if show_photo %}
+        <circle class="ring-halo" cx="{{ geom.centre_x }}" cy="{{ geom.centre_y }}" r="{{ radius }}" stroke-width="{{ geom.stroke * 3 }}" />
+      {% endif %}
       <circle class="ring" cx="{{ geom.centre_x }}" cy="{{ geom.centre_y }}" r="{{ radius }}" fill="none" stroke-width="{{ geom.stroke }}" />
     {% endfor %}
+    {# A hole is a thin ring at the true calibre, so it still sits on the hole in the photo,
+       around a small dot: in a tight group full-size discs merge into one blob. #}
+    {% set dot = geom.hole_radius / 3 %}
     {% for hole in overlay.holes %}
-      <circle class="{{ hole.ring | ring_class(overlay.profile.n_rings) }}" cx="{{ hole.x_canon }}" cy="{{ hole.y_canon }}" r="{{ geom.hole_radius }}">
-      <title>ring {{ hole.ring if hole.ring else "miss" }}</title>
-      </circle>
+      {% if hole.ring %}
+        <g class="{{ hole.ring | ring_class(overlay.profile.n_rings) }}">
+        <title>ring {{ hole.ring }}</title>
+        <circle class="hole-edge" cx="{{ hole.x_canon }}" cy="{{ hole.y_canon }}" r="{{ geom.hole_radius }}" stroke-width="{{ geom.stroke }}" />
+        <circle class="hole-dot" cx="{{ hole.x_canon }}" cy="{{ hole.y_canon }}" r="{{ dot }}" stroke-width="{{ geom.stroke }}" />
+        </g>
+      {% else %}
+        {# A miss is a cross, so it is told from a scoring hole by shape, not by hue alone. #}
+        {% set r = dot * 1.5 %}
+        {% set cross = "M%s %sL%s %sM%s %sL%s %s" | format(hole.x_canon - r, hole.y_canon - r, hole.x_canon + r, hole.y_canon + r, hole.x_canon - r, hole.y_canon + r, hole.x_canon + r, hole.y_canon - r) %}
+        <path class="hole-halo" d="{{ cross }}" stroke-width="{{ r / 2 + geom.stroke * 2 }}" />
+        <path class="hole-miss" d="{{ cross }}" stroke-width="{{ r / 2 }}">
+        <title>miss</title>
+        </path>
+      {% endif %}
     {% endfor %}
     {% set metrics = overlay.interpretation.metrics %}
     {% if metrics.centroid %}
@@ -35,13 +55,22 @@
 {% endmacro %}
 {# One key for the page, not one per drawing. The swatches reuse the drawing's own classes,
    so a colour cannot drift between the legend and the thing it explains; without it the
-   bias vector reads as a shot. #}
+   bias vector reads as a shot. The bands are named in words, since their colours alone do
+   not tell them apart for everyone. #}
 {% macro legend() %}
   <p class="legend">
+    holes by ring:
+    {% for band, words in [("hole-good", "inner two"), ("hole-ok", "next three"), ("hole-poor", "outer")] %}
+      <svg class="swatch {{ band }}" viewBox="0 0 10 10" aria-hidden="true">
+        <circle class="hole-edge" cx="5" cy="5" r="4.5" stroke-width="0.8" />
+        <circle class="hole-dot" cx="5" cy="5" r="2" stroke-width="0.6" />
+      </svg>
+      {{ words }} ·
+    {% endfor %}
     <svg class="swatch" viewBox="0 0 10 10" aria-hidden="true">
-      <circle class="hole-good" cx="5" cy="5" r="4" />
+      <path class="hole-miss" d="M1 1L9 9M1 9L9 1" stroke-width="2" />
     </svg>
-    holes, coloured by ring ·
+    miss ·
     <svg class="swatch" viewBox="0 0 10 10" aria-hidden="true">
       <circle class="centroid" cx="5" cy="5" r="3.5" fill="none" stroke-width="1.5" />
     </svg>

@@ -246,8 +246,9 @@ internal_docs
 # Real shooting data, never part of the public repo. The default outbox is under ~.
 out/
 
-# Working notes for the coding assistant. Local to this checkout.
+# Working notes and rules for coding assistants. Local to this checkout.
 CLAUDE.md
+AGENTS.md
 
 # Tailwind standalone CLI, fetched on demand by `make css`. The built CSS is
 # committed; the binary is not.

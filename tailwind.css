@@ -11,46 +11,43 @@
  * in a Python comment — "fixed", "visible", "container" — silently becomes a utility in
  * the built sheet, which then fails CI's `git diff --exit-code` on an unrelated change. */
 @import "tailwindcss" source(none);
+/* The shared dark skin: tokens and the look of the base elements. Rules below carry
+ * size and layout only. */
+@import "./skin.css" layer(base);
 
 /* Scan the Jinja templates for class names (relative to this file). */
 @source "./server/target_analyzer/templates";
 
-/* Each token generates utilities: --color-foo -> bg-foo / text-foo / fill-foo. */
-@theme {
-  --color-bg: #0f1115;
-  --color-panel: #1a1d24;
-  --color-line: #2a2f3a;
-  --color-fg: #e6e9ef;
-  --color-muted: #9aa3b2;
-  --color-accent: #4f8cff;
-  /* Solid buttons only: white on #4f8cff is 3.2:1 and fails AA, while #4f8cff
-   * itself stays fine for links and focus rings on the dark ground (5.2:1). */
-  --color-accent-strong: #3366cc;
-  --color-pos: #3fb950;
-  --color-neg: #f0686b;
-  /* Field borders. --color-line is ~1.3:1 on a panel, under the 3:1 WCAG 1.4.11
-   * wants for an input boundary; this is ~3.5:1 and still subtle. */
-  --color-field-border: #6b7280;
-  --font-sans: system-ui, -apple-system, sans-serif;
+/* The skin's tokens as utilities: --color-foo -> bg-foo / text-foo / fill-foo.
+ * `inline` makes each utility read the skin variable itself (fill-pos -> var(--pos)). */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-pos: var(--pos);
+  --color-neg: var(--neg);
+  --color-warn: var(--warn);
+  --color-field-border: var(--field-border);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --font-sans: var(--sans);
 }
 
 @layer base {
   /* Column flex so the footer lands at the bottom of the viewport: most pages here are
    * short, and a footer floating a third of the way down leaves a screen of nothing. */
   body {
-    @apply m-0 flex min-h-screen flex-col bg-bg text-fg font-sans leading-normal;
-    font-size: 15px;
-    color-scheme: dark;
+    @apply flex min-h-screen flex-col wrap-break-word;
   }
 
   header {
-    @apply flex flex-wrap items-baseline gap-x-4 gap-y-3 border-b border-line px-5 py-3;
-  }
-  header h1 {
-    @apply m-0 text-base;
-  }
-  header h1 a {
-    @apply text-fg no-underline;
+    @apply flex flex-wrap items-baseline gap-x-4 gap-y-3 px-5 py-3;
   }
   header nav {
     @apply flex flex-wrap items-center gap-4;
@@ -60,103 +57,96 @@
   }
 
   main {
-    @apply mx-auto w-full max-w-[1100px] grow px-6 py-5;
+    @apply mx-auto w-full max-w-[1100px] grow p-[clamp(1rem,2.5vw,2rem)];
   }
+  /* Underlined: in muted text the link colour alone is 1.3:1 from its surroundings. */
   main a {
-    @apply text-accent no-underline hover:underline;
+    @apply text-accent underline underline-offset-2;
   }
   main p {
     @apply my-2;
   }
 
+  h1,
   h2 {
-    @apply mb-2 mt-6 text-[15px] uppercase tracking-wider text-muted;
+    @apply mb-2 mt-6;
   }
   h3 {
     @apply mb-2 mt-0 text-sm;
   }
 
   table {
-    @apply w-full border-collapse;
+    @apply tabular-nums;
   }
   th,
   td {
-    @apply border-b border-line px-3 py-2.5 text-left;
-  }
-  th {
-    @apply text-[13px] font-semibold text-muted;
+    @apply px-3 py-3;
   }
 
   label {
-    @apply mb-1 block text-[13px] text-muted;
+    @apply mb-1 block;
   }
 
   input,
   select,
   button {
-    @apply h-10 max-w-full rounded-md border border-field-border bg-bg px-2 text-fg md:h-9;
-    font: inherit;
+    @apply h-10 max-w-full px-2;
   }
   button {
-    @apply cursor-pointer border-accent-strong bg-accent-strong text-white transition-colors hover:border-accent hover:bg-accent;
-  }
-  button.ghost {
-    @apply border-field-border bg-transparent text-muted transition-colors hover:border-fg hover:text-fg;
+    @apply transition-colors;
   }
   textarea {
-    @apply block w-full max-w-[640px] rounded-md border border-field-border bg-bg px-2 py-1.5 text-fg;
-    font: inherit;
+    @apply block w-full max-w-[640px] px-2 py-2;
   }
 
   code {
-    @apply rounded bg-bg px-1 text-[0.9em];
+    @apply rounded-md bg-bg px-1 text-[0.9em];
   }
 
   footer {
-    @apply border-t border-line px-5 py-3.5 text-center text-xs text-muted;
+    @apply px-5 py-3;
   }
   footer a {
-    @apply text-muted hover:text-fg;
-  }
-
-  button:focus-visible,
-  select:focus-visible,
-  input:focus-visible,
-  textarea:focus-visible,
-  a:focus-visible {
-    @apply outline outline-2 outline-offset-2 outline-accent;
+    @apply text-muted underline underline-offset-2 hover:text-fg;
   }
 }
 
 @layer components {
   .panel {
-    @apply mb-4 overflow-x-auto rounded-lg border border-line bg-panel p-4;
+    @apply mb-4 overflow-x-auto p-4;
+  }
+  /* The padding is the gap at the top; a heading's own top margin would double it. Here
+   * rather than in the base layer, so it also wins over `.panel-narrow`'s margin. */
+  main > :first-child,
+  .panel > :first-child {
+    @apply mt-0;
   }
   .panel-narrow {
-    @apply mx-auto mt-10 max-w-[360px];
+    @apply mx-auto mt-8 max-w-[360px];
   }
   /* Scoped rather than set on `input`, so the dashboard's inline filters keep their own
-   * width. */
+   * width. The gap under a field is what ties each label to the field below it rather
+   * than the one above. */
   .panel-narrow input {
+    @apply mb-3 w-full;
+  }
+  .panel-narrow button {
     @apply w-full;
   }
-  .muted {
-    @apply text-muted;
-  }
   .flash {
-    @apply rounded-md border border-line px-3 py-2;
-  }
-  .flash-error {
-    @apply border-neg text-neg;
+    @apply px-3 py-2;
   }
   .userbox {
     @apply ml-auto;
   }
   .filters {
-    @apply flex flex-wrap items-end gap-4;
+    @apply mb-4 flex flex-wrap items-end gap-4;
   }
   .filters label {
     @apply mb-1;
+  }
+  .table-scroll {
+    @apply overflow-x-auto;
   }
   .notes {
     @apply max-w-[260px] text-[13px] text-muted;
@@ -167,30 +157,57 @@
   .target {
     @apply mx-auto block w-full max-w-[520px];
   }
+  /* The Session panel: the target with its numbers and notes beside it, wrapping to one
+   * column where the two do not fit side by side. */
+  .reading {
+    @apply flex flex-wrap items-start gap-6;
+  }
+  .reading-target {
+    @apply max-w-[520px] min-w-0 flex-[1_1_360px];
+  }
+  .reading-side {
+    @apply min-w-0 flex-[1_1_240px];
+  }
+  .reading-side .metrics {
+    @apply mt-0;
+  }
   .ring {
     @apply stroke-muted opacity-70;
   }
+  .ring-halo,
+  .hole-halo {
+    @apply fill-none stroke-bg;
+  }
+  /* The target's marks take the skin's chart colours in order, the bias line and group
+   * centre first; a miss keeps --neg, because there the colour means a miss. */
   .bias {
-    @apply stroke-accent;
+    @apply stroke-chart-1;
   }
   .centroid {
-    @apply stroke-accent;
+    @apply stroke-chart-1;
   }
 
-  /* Hole markers, banded by ring. These four exist as component classes because
+  /* Hole markers, banded by ring. These exist as component classes because
    * templating.ring_class builds the name at runtime: a bare utility would appear
-   * in no template for @source to find and would be purged. */
+   * in no template for @source to find and would be purged. A band sets the colour; the
+   * dot's dark outline keeps it visible over a photo of white paper. */
   .hole-good {
-    @apply fill-pos;
+    @apply text-chart-2;
   }
   .hole-ok {
-    @apply fill-accent;
+    @apply text-chart-3;
   }
   .hole-poor {
-    @apply fill-muted;
+    @apply text-chart-4;
+  }
+  .hole-edge {
+    @apply fill-none stroke-current;
+  }
+  .hole-dot {
+    @apply fill-current stroke-bg;
   }
   .hole-miss {
-    @apply fill-neg;
+    @apply fill-none stroke-neg;
   }
 
   .legend {
@@ -213,7 +230,7 @@
   /* auto-FILL, not auto-fit: a reading left alone on the last row keeps one column's
    * width instead of stretching across the whole grid. */
   .compare {
-    @apply grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4;
+    @apply grid grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-4;
   }
   .compare > .panel {
     @apply min-w-0;

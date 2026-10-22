@@ -10,6 +10,7 @@ from datetime import date
 
 import pytest
 from fastapi import status
+from sqlmodel import select
 
 from ta_shared.payload import Hit, SessionMeta
 from target_analyzer.config import get_settings
@@ -322,3 +323,51 @@ def test_the_shooter_filter_waits_for_a_second_shooter(
     _shot_by(client, auth, png_bytes, "Tata", size=42, day=3)
 
     assert 'id="shooter"' in auth_client.get("/dashboard").text
+
+
+def test_the_filters_wait_for_a_first_session(auth_client):
+    assert 'class="filters"' not in auth_client.get("/dashboard").text
+
+
+def test_the_filters_submit_by_button_not_on_change(auth_client, ingested):
+    page = auth_client.get("/dashboard").text
+
+    assert 'class="filters"' in page
+    assert "onchange" not in page
+    assert '<button type="submit">Apply</button>' in page
+
+
+def test_a_miss_is_drawn_as_a_cross(auth_client, client, auth, png_bytes, profile):
+    payload = make_payload(
+        make_jpeg(size=44), hits=[Hit(x_canon=500, y_canon=500), Hit(x_canon=990, y_canon=990)]
+    )
+    posted = post_ingest(client, auth, payload, png_bytes)
+    drawing = auth_client.get(f"/dashboard/session/{posted.json()['session_id']}").text
+    drawing = drawing.split("</svg>")[0]
+
+    assert drawing.count('<path class="hole-miss"') == 1
+    assert drawing.count('class="hole-good"') == 1
+
+
+def test_a_single_reading_keeps_its_notes_beside_the_target(auth_client, ingested):
+    page = auth_client.get(f"/dashboard/session/{ingested['session_id']}").text
+
+    assert page.count('id="notes"') == 1
+    assert (
+        page.index('class="reading-side"') < page.index('id="notes"') < page.index('class="legend"')
+    )
+
+
+def test_several_photos_keep_the_notes_below_them(
+    auth_client, client, auth, png_bytes, ingested, db_session
+):
+    second = post_ingest(client, auth, make_payload(make_jpeg(size=46)), png_bytes).json()
+    image = db_session.exec(select(Image).where(Image.session_id == second["session_id"])).one()
+    image.session_id = ingested["session_id"]
+    db_session.add(image)
+    db_session.commit()
+    page = auth_client.get(f"/dashboard/session/{ingested['session_id']}").text
+
+    assert page.count('class="reading"') == 2
+    assert page.count('id="notes"') == 1
+    assert page.index('class="legend"') < page.index('id="notes"')
