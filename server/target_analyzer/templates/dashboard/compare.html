@@ -2,7 +2,7 @@
 {% import "_macros.html" as ui %}
 {% block title %}Compare readings — target-analyzer{% endblock %}
 {% block content %}
-  <h2>One photo, {{ overlays | length }} reading{{ "" if overlays | length == 1 else "s" }}</h2>
+  <h1>One photo, {{ overlays | length }} reading{{ "" if overlays | length == 1 else "s" }}</h1>
   <p class="muted">
     <a href="/dashboard/session/{{ session.id }}">{{ session.gun }} — {{ session.distance_m | m }} m</a>
     {% if show_photo %}

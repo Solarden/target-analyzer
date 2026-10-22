@@ -8,21 +8,20 @@
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   </head>
   <body>
-    {% if user %}
-      <header>
-        <h1>
-          <a href="/dashboard">target-analyzer</a>
-        </h1>
+    <header>
+      <p class="brand">
+        <a href="/dashboard">target-analyzer</a>
+      </p>
+      {% if user %}
         <nav>
           <a href="/dashboard">Trend</a>
         </nav>
         <form class="userbox" method="post" action="/logout">
-          <button type="submit" class="ghost">Log out</button>
+          <button type="submit" class="quiet">Log out</button>
         </form>
-      </header>
-    {% endif %}
+      {% endif %}
+    </header>
     <main>
-      {% if error %}<p class="flash flash-error">{{ error }}</p>{% endif %}
       {% block content %}{% endblock %}
     </main>
     <footer>

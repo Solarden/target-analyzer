@@ -17,7 +17,12 @@
   if (!island || !canvas || !window.Chart) return;
 
   const data = JSON.parse(island.textContent);
-  const colours = ["#4f8cff", "#3fb950", "#f0686b", "#d29922", "#a371f7", "#9aa3b2"];
+  // The skin's categorical chart colours, read from its variables like chart-theme.js does.
+  // A series keeps its slot under every filter, because its index is its shooter's place.
+  const skin = getComputedStyle(document.documentElement);
+  const colours = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => skin.getPropertyValue(`--chart-${n}`).trim());
+  // A shape per shooter as well as a colour, so colour alone never has to tell lines apart.
+  const shapes = ["circle", "rect", "triangle", "rectRot", "star", "crossRot"];
 
   new Chart(canvas, {
     type: "line",
@@ -25,8 +30,15 @@
       labels: data.labels,
       datasets: data.series.map((series) => {
         const colour = colours[series.colour % colours.length];
+        const shape = shapes[series.colour % shapes.length];
 
-        return { label: series.label, data: series.data, borderColor: colour, pointBackgroundColor: colour };
+        return {
+          label: series.label,
+          data: series.data,
+          borderColor: colour,
+          pointBackgroundColor: colour,
+          pointStyle: shape,
+        };
       }),
     },
     options: {
@@ -36,6 +48,7 @@
       // Chart.js fills a point with a near-transparent black, which on this background is
       // the difference between one session rendering and appearing not to.
       elements: { point: { radius: 4, hoverRadius: 6 } },
+      plugins: { legend: { labels: { usePointStyle: true } } },
       scales: {
         y: { type: "linear", suggestedMin: 0, title: { display: true, text: data.title } },
       },

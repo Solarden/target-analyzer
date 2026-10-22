@@ -22,10 +22,8 @@ from target_analyzer.config import INSECURE_DEFAULT_SECRET, get_settings
 # Set here rather than in the shipped Caddyfile because not every deployment is served
 # through that file — one behind its own proxy would otherwise get none of this.
 SECURITY_HEADERS = {
-    # 'unsafe-inline' is for the two onchange="this.form.submit()" handlers on the Trend
-    # filters.
     "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; "
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
         "img-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     ),
     # Same-origin forms throughout, so framing is never legitimate — and SameSite=Lax does
